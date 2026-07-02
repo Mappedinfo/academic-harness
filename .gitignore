@@ -1,0 +1,16 @@
+.DS_Store
+.env
+.venv/
+.build/
+.swiftpm/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.workbench/
+dist/
+build/
+*.egg-info/
+config.local.json
+qoder.local.json
