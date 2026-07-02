@@ -33,6 +33,14 @@ class ProjectStatusTests(unittest.TestCase):
         self.assertTrue(status["checks"]["tasks"]["ok"])
         self.assertTrue(status["checks"]["qoder"]["ok"])
         self.assertEqual(status["checks"]["qoder"]["config_path"].split("/")[-1], "qoder.local.json")
+        self.assertIn("models", status["checks"]["qoder"])
+        self.assertIn("available_models", status["checks"]["qoder"]["models"])
+        self.assertIn("managed_agents", status["checks"]["qoder"])
+        self.assertFalse(status["checks"]["qoder"]["managed_agents"]["ready"])
+        self.assertIn("model_ok", status["checks"]["qoder"]["managed_agents"])
+        self.assertIn("schema_ok", status["checks"]["qoder"]["managed_agents"])
+        self.assertEqual(status["checks"]["qoder"]["managed_agents"]["delegation_strategy"], "agent_sync")
+        self.assertEqual(status["checks"]["qoder"]["managed_agents"]["agent_count"], 4)
 
     def test_missing_qoder_config_is_reported(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

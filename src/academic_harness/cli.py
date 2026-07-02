@@ -6,7 +6,14 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .project import init_project, project_status, reset_qoder_config, set_lan_config, set_qoder_config
+from .project import (
+    init_project,
+    project_status,
+    reset_qoder_config,
+    set_lan_config,
+    set_local_ai_config,
+    set_qoder_config,
+)
 from .qoder_dependency import DEFAULT_QODER_REPO_URL, discover_qoder_runner, install_qoder_runner
 from .paths import PROJECT_FILE
 from .runs import list_project_runs, rerun_validators, run_task, show_run
@@ -38,6 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
     project_status_parser.add_argument("--project", required=True, type=Path)
     project_status_parser.add_argument("--json", action="store_true")
     project_status_parser.add_argument("--check-lan", action="store_true")
+    project_status_parser.add_argument("--check-local-ai", action="store_true")
     project_status_parser.set_defaults(func=_cmd_project_status)
 
     project_lan = project_subparsers.add_parser("set-lan", help="write LAN worker config")
@@ -47,6 +55,16 @@ def build_parser() -> argparse.ArgumentParser:
     project_lan.add_argument("--ssh-alias")
     project_lan.add_argument("--enabled", choices=["true", "false"])
     project_lan.set_defaults(func=_cmd_project_set_lan)
+
+    project_local_ai = project_subparsers.add_parser("set-local-ai", help="write local AI backend config")
+    project_local_ai.add_argument("--project", required=True, type=Path)
+    project_local_ai.add_argument("--enabled", choices=["true", "false"])
+    project_local_ai.add_argument("--provider", choices=["openai_compatible", "ollama", "vllm"])
+    project_local_ai.add_argument("--base-url")
+    project_local_ai.add_argument("--model")
+    project_local_ai.add_argument("--api-key-env")
+    project_local_ai.add_argument("--timeout-seconds", type=int)
+    project_local_ai.set_defaults(func=_cmd_project_set_local_ai)
 
     project_qoder = project_subparsers.add_parser("set-qoder", help="write Qoder runner config")
     project_qoder.add_argument("--project", required=True, type=Path)
@@ -85,10 +103,25 @@ def build_parser() -> argparse.ArgumentParser:
     task_run.add_argument("--project", type=Path, help="project root; defaults to nearest project.yaml")
     task_run.add_argument(
         "--adapter",
-        choices=["auto", "qoder", "qoder_cli", "qoder_cloud", "cloud", "local_control", "local", "fake"],
+        choices=[
+            "auto",
+            "qoder",
+            "qoder_cli",
+            "qoder_cloud",
+            "cloud",
+            "local_control",
+            "local",
+            "hybrid",
+            "hybrid_ai",
+            "fake",
+        ],
         default="auto",
     )
     task_run.add_argument("--run-id")
+    task_run.add_argument("--managed-agents", choices=["auto", "on", "off"], default="auto")
+    task_run.add_argument("--managed-agent-count", type=int, choices=[3, 4, 5])
+    task_run.add_argument("--require-managed-agents", action="store_true")
+    task_run.add_argument("--delegation-strategy", choices=["agent_sync", "child_threads"])
     task_run.set_defaults(func=_cmd_task_run)
 
     runs_parser = subparsers.add_parser("runs", help="run history commands")
@@ -124,7 +157,7 @@ def _cmd_init(args: argparse.Namespace) -> int:
 
 
 def _cmd_project_status(args: argparse.Namespace) -> int:
-    status = project_status(args.project, check_lan=args.check_lan)
+    status = project_status(args.project, check_lan=args.check_lan, check_local_ai=args.check_local_ai)
     if args.json:
         print(json.dumps(status, ensure_ascii=False, indent=2, sort_keys=True))
     else:
@@ -143,6 +176,21 @@ def _cmd_project_set_lan(args: argparse.Namespace) -> int:
         project_root=args.project_root,
         ssh_alias=args.ssh_alias,
         enabled=enabled,
+    )
+    print(json.dumps(status, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0
+
+
+def _cmd_project_set_local_ai(args: argparse.Namespace) -> int:
+    enabled = None if args.enabled is None else args.enabled == "true"
+    status = set_local_ai_config(
+        args.project,
+        enabled=enabled,
+        provider=args.provider,
+        base_url=args.base_url,
+        model=args.model,
+        api_key_env=args.api_key_env,
+        timeout_seconds=args.timeout_seconds,
     )
     print(json.dumps(status, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
@@ -198,7 +246,18 @@ def _cmd_qoder_install(args: argparse.Namespace) -> int:
 
 
 def _cmd_task_run(args: argparse.Namespace) -> int:
-    manifest = run_task(args.task_yaml, adapter=args.adapter, run_id=args.run_id, project_root=args.project)
+    manifest = run_task(
+        args.task_yaml,
+        adapter=args.adapter,
+        run_id=args.run_id,
+        project_root=args.project,
+        run_options={
+            "managed_agents": args.managed_agents,
+            "managed_agent_count": args.managed_agent_count,
+            "require_managed_agents": args.require_managed_agents,
+            "delegation_strategy": args.delegation_strategy,
+        },
+    )
     _print_run_summary(manifest)
     return 0 if manifest["status"] == "passed" else 1
 

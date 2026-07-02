@@ -91,7 +91,16 @@ def normalize_qoder_outputs(run_dir: Path, result: dict[str, Any]) -> list[dict[
             if path.is_file():
                 artifacts.append(_artifact_record(path, "qoder_artifact"))
 
-    for raw_name in ["metadata.json", "session.json", "events.sse", "events.jsonl", "prompt.txt"]:
+    for raw_name in [
+        "metadata.json",
+        "session.json",
+        "events.sse",
+        "events.jsonl",
+        "prompt.txt",
+        "agent_roster.json",
+        "threads.json",
+        "delegations.jsonl",
+    ]:
         raw_path = qoder_dir / raw_name
         if raw_path.exists():
             artifacts.append(_artifact_record(raw_path, "qoder_raw"))

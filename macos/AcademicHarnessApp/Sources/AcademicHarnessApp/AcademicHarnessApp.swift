@@ -173,6 +173,53 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
+                if model.runMode == .fullCloud {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Toggle("深度搜索多 Agent", isOn: $model.managedAgentsEnabled)
+                        HStack {
+                            Text("Agent 数量")
+                                .foregroundStyle(.secondary)
+                            Picker("Agent 数量", selection: $model.managedAgentCount) {
+                                Text("3").tag(3)
+                                Text("4").tag(4)
+                                Text("5").tag(5)
+                            }
+                            .pickerStyle(.segmented)
+                            .frame(width: 150)
+                            Spacer()
+                        }
+                        Picker("委派方式", selection: $model.managedDelegationStrategy) {
+                            Text("Agent 同步").tag("agent_sync")
+                            Text("Child 线程").tag("child_threads")
+                        }
+                        .pickerStyle(.segmented)
+                        Toggle("必须成功创建多 Agent", isOn: $model.requireManagedAgents)
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(model.qoderManagedModelOK ? Color.green : Color.orange)
+                                .frame(width: 8, height: 8)
+                            Text(model.qoderManagedModelText)
+                                .font(.caption2)
+                                .foregroundStyle(model.qoderManagedModelOK ? .green : .orange)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(model.qoderManagedSchemaOK ? Color.green : Color.orange)
+                                .frame(width: 8, height: 8)
+                            Text(model.qoderManagedSchemaText)
+                                .font(.caption2)
+                                .foregroundStyle(model.qoderManagedSchemaOK ? .green : .orange)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Text(model.managedAgentsDetail)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .disabled(model.isRunning)
+                }
+
                 HStack {
                     Button("启动运行") { model.startRun() }
                         .buttonStyle(.borderedProminent)
@@ -276,6 +323,7 @@ struct ContentView: View {
     private var settingsView: some View {
         VStack(alignment: .leading, spacing: 12) {
             qoderSettingsCard
+            localAISettingsCard
 
             GroupBox("局域网 Worker") {
                 VStack(alignment: .leading, spacing: 8) {
@@ -308,6 +356,39 @@ struct ContentView: View {
             Spacer()
         }
         .padding(.top, 4)
+    }
+
+    private var localAISettingsCard: some View {
+        GroupBox("本地 AI Backend") {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .center, spacing: 8) {
+                    Circle()
+                        .fill(model.localAIOK ? Color.green : Color.red)
+                        .frame(width: 10, height: 10)
+                    Text(model.localAIStatusTitle)
+                        .font(.headline)
+                    Spacer()
+                }
+                Toggle("启用", isOn: $model.localAIEnabled)
+                labeledField("Provider", text: $model.localAIProvider)
+                labeledField("Base URL", text: $model.localAIBaseURL)
+                labeledField("Model", text: $model.localAIModel)
+                labeledField("API Key Env", text: $model.localAIAPIKeyEnv)
+                labeledField("Timeout", text: $model.localAITimeout)
+                HStack {
+                    Button("保存本地 AI") { model.saveLocalAIConfig() }
+                        .disabled(!model.hasProject || model.isRunning)
+                    Button("检查连接") { model.checkLocalAI() }
+                        .disabled(!model.hasProject || model.isRunning)
+                    Spacer()
+                }
+                Text(model.localAIMessage)
+                    .font(.caption)
+                    .foregroundStyle(model.localAIOK ? .green : .orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.vertical, 4)
+        }
     }
 
     private var qoderSettingsCard: some View {
@@ -366,7 +447,7 @@ struct ContentView: View {
     }
 
     private var logView: some View {
-        TextEditor(text: $model.logText)
+        TextEditor(text: .constant(model.combinedLogText))
             .font(.system(.caption, design: .monospaced))
             .overlay(editorBorder)
     }
@@ -433,10 +514,12 @@ struct RunItem: Identifiable, Hashable {
     let reportPath: URL?
     let summaryPath: URL?
     let manifestPath: URL
+    let diagnostics: String
 }
 
 enum RunMode: String, CaseIterable, Identifiable {
     case fullCloud
+    case hybrid
     case localControl
     case fake
     case qoderCLI
@@ -447,6 +530,8 @@ enum RunMode: String, CaseIterable, Identifiable {
         switch self {
         case .fullCloud:
             return "全云端"
+        case .hybrid:
+            return "混合 AI"
         case .localControl:
             return "本地把控"
         case .fake:
@@ -460,6 +545,8 @@ enum RunMode: String, CaseIterable, Identifiable {
         switch self {
         case .fullCloud:
             return "qoder_cloud"
+        case .hybrid:
+            return "hybrid"
         case .localControl:
             return "local_control"
         case .fake:
@@ -470,13 +557,19 @@ enum RunMode: String, CaseIterable, Identifiable {
     }
 
     var requiresQoder: Bool {
-        self == .fullCloud || self == .qoderCLI
+        self == .fullCloud || self == .hybrid || self == .qoderCLI
+    }
+
+    var requiresLocalAI: Bool {
+        self == .hybrid
     }
 
     var detail: String {
         switch self {
         case .fullCloud:
             return "本地只提交任务和收取 artifacts，实际调研与拆解由 Qoder Cloud Agent 完成。"
+        case .hybrid:
+            return "本地 AI 先拆解和审查，Qoder Cloud 执行搜索写作，本地 AI 再审校整合。"
         case .localControl:
             return "本地生成控制计划和检查材料，不启动远程云端运行。"
         case .fake:
@@ -506,6 +599,7 @@ final class WorkbenchModel: ObservableObject {
     @Published var promptPathDisplay = ""
     @Published var promptUsesTaskObjective = false
     @Published var logText = ""
+    @Published var runDiagnosticsText = ""
     @Published var qoderOK = false
     @Published var qoderMessage = "未加载项目"
     @Published var qoderRunnerCommand = "qoder-run"
@@ -515,6 +609,30 @@ final class WorkbenchModel: ObservableObject {
     @Published var qoderResolvedConfigPath = ""
     @Published var qoderSource = ""
     @Published var qoderRegistryPath = ""
+    @Published var qoderManagedMessage = "深度搜索多 Agent 待检查"
+    @Published var qoderManagedReady = false
+    @Published var qoderManagedSchemaOK = true
+    @Published var qoderManagedAgentCount = 4
+    @Published var qoderManagedConfiguredCount = 4
+    @Published var qoderManagedModelOK = false
+    @Published var qoderManagedRequestedModel = ""
+    @Published var qoderManagedResolvedModel = ""
+    @Published var qoderManagedModelSource = ""
+    @Published var qoderManagedDelegationStrategy = "agent_sync"
+    @Published var qoderManagedIncludeSelf = false
+    @Published var qoderModelsMessage = "模型未检查"
+    @Published var managedAgentsEnabled = true
+    @Published var managedAgentCount = 4
+    @Published var managedDelegationStrategy = "agent_sync"
+    @Published var requireManagedAgents = false
+    @Published var localAIOK = false
+    @Published var localAIEnabled = false
+    @Published var localAIProvider = "openai_compatible"
+    @Published var localAIBaseURL = "http://127.0.0.1:11434/v1"
+    @Published var localAIModel = ""
+    @Published var localAIAPIKeyEnv = "LOCAL_AI_API_KEY"
+    @Published var localAITimeout = "120"
+    @Published var localAIMessage = "本地 AI 未配置"
     @Published var showAdvancedQoderSettings = false
     @Published var showAdvancedAppSettings = false
     @Published var lanOK = true
@@ -544,7 +662,10 @@ final class WorkbenchModel: ObservableObject {
     }
 
     var canStartRun: Bool {
-        canRunBase && (!runMode.requiresQoder || qoderOK)
+        canRunBase
+            && (!runMode.requiresQoder || qoderOK)
+            && (!runMode.requiresLocalAI || localAIOK)
+            && !strictManagedAgentModelBlock
     }
 
     var canSavePrompt: Bool {
@@ -553,6 +674,38 @@ final class WorkbenchModel: ObservableObject {
 
     var runModeDetail: String {
         runMode.detail
+    }
+
+    var managedAgentsDetail: String {
+        if !managedAgentsEnabled {
+            return "本次全云端运行将使用单个 Qoder Agent。"
+        }
+        let workerCount = max(2, managedAgentCount - 1)
+        let state = qoderManagedReady ? "本地 roster 已准备" : "首次运行会自动创建或更新"
+        let model = qoderManagedResolvedModel.isEmpty ? "未解析" : qoderManagedResolvedModel
+        let strategy = managedDelegationStrategy == "child_threads" ? "Child 线程" : "Agent 同步"
+        return "1 个统领 Agent + \(workerCount) 个分工 Agent；委派方式: \(strategy)；\(state)。模型: \(model)。\(qoderManagedMessage)"
+    }
+
+    var qoderManagedModelText: String {
+        if qoderManagedModelOK {
+            let resolved = qoderManagedResolvedModel.isEmpty ? "自动选择" : qoderManagedResolvedModel
+            let source = qoderManagedModelSource.isEmpty ? "" : " (\(qoderManagedModelSource))"
+            return "Qoder 模型可用: \(resolved)\(source)"
+        }
+        return "Qoder 模型不可用: \(qoderModelsMessage)"
+    }
+
+    var qoderManagedSchemaText: String {
+        if qoderManagedSchemaOK {
+            let strategy = qoderManagedDelegationStrategy == "child_threads" ? "Child 线程" : "Agent 同步"
+            return "Multiagent schema OK: \(qoderManagedAgentCount) agents, \(strategy)"
+        }
+        return "Multiagent schema 错误：下次运行会自动更新 roster"
+    }
+
+    var localAIStatusTitle: String {
+        localAIOK ? "本地 AI 已就绪" : "本地 AI 未就绪"
     }
 
     var startReadinessText: String {
@@ -567,6 +720,12 @@ final class WorkbenchModel: ObservableObject {
         }
         if runMode.requiresQoder && !qoderOK {
             return "当前模式需要 Qoder 配置就绪"
+        }
+        if strictManagedAgentModelBlock {
+            return "必须创建多 Agent，但当前 Qoder 模型不可用：\(qoderModelsMessage)"
+        }
+        if runMode.requiresLocalAI && !localAIOK {
+            return "混合 AI 模式需要本地 AI Backend 就绪"
         }
         return "将以“\(runMode.title)”启动当前任务"
     }
@@ -594,7 +753,11 @@ final class WorkbenchModel: ObservableObject {
             let runner = shortName(qoderRunnerPath.isEmpty ? qoderRunnerCommand : qoderRunnerPath)
             let config = shortName(qoderResolvedConfigPath.isEmpty ? qoderConfigPath : qoderResolvedConfigPath)
             let nextStep = selectedTask == nil ? "请先在左侧选择一个任务。" : "选择运行模式后点击“启动运行”。"
-            return "已连接 \(runner)，使用 \(config)，Profile: \(qoderProfile)。\(nextStep)"
+            let modelText = qoderManagedModelOK
+                ? "多 Agent 模型可用: \(qoderManagedResolvedModel.isEmpty ? "自动选择" : qoderManagedResolvedModel)"
+                : "多 Agent 模型未就绪: \(qoderModelsMessage)"
+            let schemaText = qoderManagedSchemaOK ? "Multiagent schema OK" : "Multiagent schema 需更新"
+            return "已连接 \(runner)，使用 \(config)，Profile: \(qoderProfile)。\(modelText)。\(schemaText)。\(qoderManagedMessage)。\(nextStep)"
         }
         return "点击“一键配置 Qoder”会安装/注册 qoder-run，并让项目回到系统自动发现模式。"
     }
@@ -605,8 +768,25 @@ final class WorkbenchModel: ObservableObject {
             "Runner: \(qoderRunnerPath.isEmpty ? qoderRunnerCommand : qoderRunnerPath)",
             "Config: \(qoderResolvedConfigPath.isEmpty ? qoderConfigPath : qoderResolvedConfigPath)",
             "Registry: \(qoderRegistryPath.isEmpty ? "默认位置" : qoderRegistryPath)",
+            "Models: \(qoderModelsMessage)",
+            "Managed model: requested=\(qoderManagedRequestedModel.isEmpty ? "auto" : qoderManagedRequestedModel), resolved=\(qoderManagedResolvedModel.isEmpty ? "none" : qoderManagedResolvedModel), source=\(qoderManagedModelSource.isEmpty ? "unknown" : qoderManagedModelSource)",
+            "Managed schema: ok=\(qoderManagedSchemaOK), agents=\(qoderManagedAgentCount), strategy=\(qoderManagedDelegationStrategy), include_self=\(qoderManagedIncludeSelf)",
+            "Managed Agents: \(qoderManagedMessage)",
             "状态: \(qoderMessage)"
         ].joined(separator: "\n")
+    }
+
+    var combinedLogText: String {
+        [logText, runDiagnosticsText]
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .joined(separator: "\n\n")
+    }
+
+    private var strictManagedAgentModelBlock: Bool {
+        (runMode == .fullCloud || runMode == .hybrid)
+            && managedAgentsEnabled
+            && requireManagedAgents
+            && !qoderManagedModelOK
     }
 
     func createProject() {
@@ -656,11 +836,20 @@ final class WorkbenchModel: ObservableObject {
 
     private func runSelectedTask(adapter: String) {
         guard let task = selectedTask else { return }
-        runCLI(arguments: [
+        var arguments = [
             "task", "run", task.path.path,
             "--project", projectURL.path,
             "--adapter", adapter
-        ]) { [weak self] _ in
+        ]
+        if runMode == .fullCloud || runMode == .hybrid {
+            arguments.append(contentsOf: ["--managed-agents", managedAgentsEnabled ? "on" : "off"])
+            arguments.append(contentsOf: ["--managed-agent-count", String(managedAgentCount)])
+            arguments.append(contentsOf: ["--delegation-strategy", managedDelegationStrategy])
+            if requireManagedAgents {
+                arguments.append("--require-managed-agents")
+            }
+        }
+        runCLI(arguments: arguments) { [weak self] _ in
             guard let self else { return }
             self.refreshRuns()
             self.selectedRunID = self.runs.first?.id
@@ -829,11 +1018,48 @@ final class WorkbenchModel: ObservableObject {
         refreshProjectStatus(checkLAN: true)
     }
 
+    func saveLocalAIConfig() {
+        var args = [
+            "project", "set-local-ai",
+            "--project", projectURL.path,
+            "--enabled", localAIEnabled ? "true" : "false"
+        ]
+        let provider = localAIProvider.trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseURL = localAIBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let model = localAIModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        let apiKeyEnv = localAIAPIKeyEnv.trimmingCharacters(in: .whitespacesAndNewlines)
+        let timeout = localAITimeout.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !provider.isEmpty {
+            args.append(contentsOf: ["--provider", provider])
+        }
+        if !baseURL.isEmpty {
+            args.append(contentsOf: ["--base-url", baseURL])
+        }
+        if !model.isEmpty {
+            args.append(contentsOf: ["--model", model])
+        }
+        if !apiKeyEnv.isEmpty {
+            args.append(contentsOf: ["--api-key-env", apiKeyEnv])
+        }
+        if !timeout.isEmpty {
+            args.append(contentsOf: ["--timeout-seconds", timeout])
+        }
+        runCLI(arguments: args) { [weak self] _ in
+            self?.refreshProjectStatus(checkLAN: false)
+        }
+    }
+
+    func checkLocalAI() {
+        refreshProjectStatus(checkLAN: false, checkLocalAI: true)
+    }
+
     func refreshFiles() {
         guard let run = selectedRun else {
             files = []
+            runDiagnosticsText = ""
             return
         }
+        runDiagnosticsText = run.diagnostics
         var found: [URL] = []
         if let enumerator = FileManager.default.enumerator(at: run.runDir, includingPropertiesForKeys: nil) {
             for case let url as URL in enumerator where !url.hasDirectoryPath {
@@ -911,6 +1137,7 @@ final class WorkbenchModel: ObservableObject {
         }
         let report = (object["report_path"] as? String).map { URL(fileURLWithPath: $0) }
         let summary = (object["summary_path"] as? String).map { URL(fileURLWithPath: $0) }
+        let diagnostics = runDiagnostics(from: object, runDir: url)
         return RunItem(
             id: runID,
             runID: runID,
@@ -919,20 +1146,61 @@ final class WorkbenchModel: ObservableObject {
             runDir: url,
             reportPath: report,
             summaryPath: summary,
-            manifestPath: manifest
+            manifestPath: manifest,
+            diagnostics: diagnostics
         )
     }
 
-    private func refreshProjectStatus(checkLAN: Bool) {
+    private func runDiagnostics(from manifest: [String: Any], runDir: URL) -> String {
+        var lines: [String] = []
+        if let runID = manifest["run_id"] as? String {
+            lines.append("Selected run: \(runID)")
+        }
+        if let status = manifest["status"] as? String {
+            lines.append("manifest.status: \(status)")
+        }
+        if let error = manifest["error"] as? String, !error.isEmpty {
+            lines.append("manifest.error: \(error)")
+        }
+        if let stopReason = manifest["stop_reason"] as? String, !stopReason.isEmpty {
+            lines.append("manifest.stop_reason: \(stopReason)")
+        }
+        let qoderMetadata = runDir.appendingPathComponent("qoder").appendingPathComponent("metadata.json")
+        if
+            let data = try? Data(contentsOf: qoderMetadata),
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        {
+            if let qoderStatus = object["status"] as? String {
+                lines.append("qoder.metadata.status: \(qoderStatus)")
+            }
+            if let qoderError = object["error"] as? String, !qoderError.isEmpty {
+                lines.append("qoder.metadata.error: \(qoderError)")
+            }
+            if let qoderStop = object["stop_reason"] as? String, !qoderStop.isEmpty {
+                lines.append("qoder.metadata.stop_reason: \(qoderStop)")
+            }
+            if
+                let managed = object["managed_agents"] as? [String: Any],
+                let managedError = managed["error"] as? String,
+                !managedError.isEmpty
+            {
+                lines.append("qoder.managed_agents.error: \(managedError)")
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private func refreshProjectStatus(checkLAN: Bool, checkLocalAI: Bool = false) {
         let args = [
             "project", "status",
             "--project", projectURL.path,
             "--json"
-        ] + (checkLAN ? ["--check-lan"] : [])
+        ] + (checkLAN ? ["--check-lan"] : []) + (checkLocalAI ? ["--check-local-ai"] : [])
         runShortCLI(arguments: args) { [weak self] output, exitCode in
             guard let self else { return }
             if exitCode != 0 {
                 self.qoderOK = false
+                self.localAIOK = false
                 self.qoderMessage = output.isEmpty ? "状态检查失败" : output
                 self.statusItems = [
                     StatusItem(id: "project", label: "项目", ok: false, message: "状态失败")
@@ -958,14 +1226,18 @@ final class WorkbenchModel: ObservableObject {
         let tasks = checkValue("tasks", in: checks)
         let runs = checkValue("runs", in: checks)
         let qoder = checkValue("qoder", in: checks)
+        let localAI = checkValue("local_ai", in: checks)
         let lan = checkValue("lan", in: checks)
         qoderOK = qoder.ok
         qoderMessage = qoder.message
+        localAIOK = localAI.ok
+        localAIMessage = localAI.message
         lanOK = lan.ok
         lanMessage = lan.message
         statusItems = [
             StatusItem(id: "project", label: "项目", ok: project.ok, message: project.ok ? "已打开" : "缺失"),
             StatusItem(id: "qoder", label: "Qoder", ok: qoder.ok, message: qoder.ok ? "已就绪" : "未配置"),
+            StatusItem(id: "local_ai", label: "Local AI", ok: localAI.ok, message: localAI.ok ? "已就绪" : "未配置"),
             StatusItem(id: "tasks", label: "任务", ok: tasks.ok, message: tasks.ok ? "有任务" : "无任务"),
             StatusItem(id: "runs", label: "运行", ok: runs.ok, message: runs.ok ? "已初始化" : "缺失"),
             StatusItem(id: "lan", label: "LAN", ok: lan.ok, message: lan.ok ? "正常" : "需检查")
@@ -983,6 +1255,29 @@ final class WorkbenchModel: ObservableObject {
             }
             qoderResolvedConfigPath = qoderObject["config_path"] as? String ?? qoderResolvedConfigPath
             qoderProfile = qoderObject["profile"] as? String ?? qoderProfile
+            if let models = qoderObject["models"] as? [String: Any] {
+                qoderModelsMessage = models["message"] as? String ?? qoderModelsMessage
+            }
+            if let managed = qoderObject["managed_agents"] as? [String: Any] {
+                qoderManagedMessage = managed["message"] as? String ?? qoderManagedMessage
+                qoderManagedReady = managed["ready"] as? Bool ?? false
+                qoderManagedModelOK = managed["model_ok"] as? Bool ?? false
+                qoderManagedSchemaOK = managed["schema_ok"] as? Bool ?? qoderManagedSchemaOK
+                qoderManagedRequestedModel = managed["requested_model"] as? String ?? ""
+                qoderManagedResolvedModel = managed["resolved_model"] as? String ?? ""
+                qoderManagedModelSource = managed["model_source"] as? String ?? ""
+                qoderManagedDelegationStrategy = managed["delegation_strategy"] as? String ?? qoderManagedDelegationStrategy
+                qoderManagedIncludeSelf = managed["include_self"] as? Bool ?? false
+                qoderManagedConfiguredCount = managed["total_agents"] as? Int ?? qoderManagedConfiguredCount
+                qoderManagedAgentCount = managed["agent_count"] as? Int ?? qoderManagedConfiguredCount
+                managedAgentsEnabled = managed["enabled"] as? Bool ?? managedAgentsEnabled
+                if !isRunning, ["agent_sync", "child_threads"].contains(qoderManagedDelegationStrategy) {
+                    managedDelegationStrategy = qoderManagedDelegationStrategy
+                }
+                if !isRunning && [3, 4, 5].contains(qoderManagedConfiguredCount) {
+                    managedAgentCount = qoderManagedConfiguredCount
+                }
+            }
         }
 
         if let lanObject = checks["lan"] as? [String: Any] {
@@ -990,6 +1285,17 @@ final class WorkbenchModel: ObservableObject {
             lanServer = lanObject["server"] as? String ?? ""
             lanProjectRoot = lanObject["project_root"] as? String ?? ""
             lanSSHAlias = lanObject["ssh_alias"] as? String ?? ""
+        }
+
+        if let localAIObject = checks["local_ai"] as? [String: Any] {
+            localAIEnabled = localAIObject["enabled"] as? Bool ?? false
+            localAIProvider = localAIObject["provider"] as? String ?? localAIProvider
+            localAIBaseURL = localAIObject["base_url"] as? String ?? localAIBaseURL
+            localAIModel = localAIObject["model"] as? String ?? localAIModel
+            localAIAPIKeyEnv = localAIObject["api_key_env"] as? String ?? localAIAPIKeyEnv
+            if let timeout = localAIObject["timeout_seconds"] as? Int {
+                localAITimeout = String(timeout)
+            }
         }
     }
 
@@ -1051,7 +1357,13 @@ final class WorkbenchModel: ObservableObject {
     }
 
     private func defaultRunMode(for task: TaskItem) -> RunMode {
+        if task.mode == "hybrid" {
+            return .hybrid
+        }
         if task.mode == "full_cloud" || task.type == "cloud_experiment" {
+            return .fullCloud
+        }
+        if task.type == "deep_search" {
             return .fullCloud
         }
         if task.mode == "fake" {

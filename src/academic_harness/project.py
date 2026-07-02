@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .index import init_index
+from .local_ai import local_ai_status
 from .paths import PROJECT_FILE, WORKBENCH_DIR, find_project_root, workbench_dir
 from .qoder_dependency import discover_qoder_runner
 from .yamlio import dump_yaml, load_yaml
@@ -31,7 +32,7 @@ def init_project(project_dir: Path, force: bool = False) -> Path:
     return project_dir
 
 
-def project_status(project_dir: Path, check_lan: bool = False) -> dict[str, Any]:
+def project_status(project_dir: Path, check_lan: bool = False, check_local_ai: bool = False) -> dict[str, Any]:
     project_dir = project_dir.resolve()
     project_file = project_dir / PROJECT_FILE
     status: dict[str, Any] = {
@@ -50,6 +51,7 @@ def project_status(project_dir: Path, check_lan: bool = False) -> dict[str, Any]
         status["checks"]["tasks"] = {"ok": False, "message": "project.yaml missing"}
         status["checks"]["runs"] = {"ok": False, "message": "project.yaml missing"}
         status["checks"]["qoder"] = {"ok": False, "message": "project.yaml missing"}
+        status["checks"]["local_ai"] = {"ok": False, "message": "project.yaml missing"}
         status["checks"]["lan"] = {"ok": False, "message": "project.yaml missing"}
         return status
 
@@ -68,6 +70,7 @@ def project_status(project_dir: Path, check_lan: bool = False) -> dict[str, Any]
         "message": "runs directory found" if runs_path.exists() else "runs directory missing",
     }
     status["checks"]["qoder"] = _qoder_status(project_dir, project)
+    status["checks"]["local_ai"] = local_ai_status(project, check_connection=check_local_ai)
     status["checks"]["lan"] = _lan_status(project, check_lan=check_lan)
     status["ok"] = all(
         status["checks"][name]["ok"]
@@ -117,6 +120,34 @@ def set_qoder_config(
     return project_status(root, check_lan=False)
 
 
+def set_local_ai_config(
+    project_dir: Path,
+    enabled: bool | None,
+    provider: str | None,
+    base_url: str | None,
+    model: str | None,
+    api_key_env: str | None,
+    timeout_seconds: int | None,
+) -> dict[str, Any]:
+    root, project = load_project(project_dir)
+    local_ai = dict(project.get("local_ai") or {})
+    if enabled is not None:
+        local_ai["enabled"] = enabled
+    if provider is not None:
+        local_ai["provider"] = provider
+    if base_url is not None:
+        local_ai["base_url"] = base_url
+    if model is not None:
+        local_ai["model"] = model
+    if api_key_env is not None:
+        local_ai["api_key_env"] = api_key_env
+    if timeout_seconds is not None:
+        local_ai["timeout_seconds"] = timeout_seconds
+    project["local_ai"] = local_ai
+    (root / PROJECT_FILE).write_text(dump_yaml(project), encoding="utf-8")
+    return project_status(root, check_lan=False)
+
+
 def reset_qoder_config(project_dir: Path) -> dict[str, Any]:
     root, project = load_project(project_dir)
     project["qoder"] = {"profile": "default"}
@@ -138,7 +169,31 @@ def ensure_project_dirs(project_root: Path) -> None:
 
 
 def _qoder_status(project_dir: Path, project: dict[str, Any]) -> dict[str, Any]:
-    return discover_qoder_runner(project_dir, project, check_help=True)
+    status = discover_qoder_runner(project_dir, project, check_help=True)
+    try:
+        from .executors.qoder_cloud import managed_agents_status, qoder_models_status
+
+        models = qoder_models_status(project_dir, project)
+        status["models"] = models
+        status["managed_agents"] = managed_agents_status(project_dir, project, models)
+    except Exception as error:
+        status["models"] = {
+            "ok": False,
+            "available_models": [],
+            "ids": [],
+            "message": f"models status unavailable: {error}",
+        }
+        status["managed_agents"] = {
+            "enabled": False,
+            "ready": False,
+            "model_ok": False,
+            "schema_ok": False,
+            "agent_count": 0,
+            "delegation_strategy": "agent_sync",
+            "include_self": False,
+            "message": f"managed agents status unavailable: {error}",
+        }
+    return status
 
 
 def _lan_status(project: dict[str, Any], check_lan: bool) -> dict[str, Any]:
@@ -205,7 +260,25 @@ def _default_project(name: str) -> dict[str, Any]:
             "figures_dir": "figures",
             "tables_dir": "tables",
         },
-        "qoder": {"profile": "default"},
+        "qoder": {
+            "profile": "default",
+            "managed_agents": {
+                "enabled": True,
+                "delegation_strategy": "agent_sync",
+                "include_self": False,
+                "total_agents": 4,
+                "model": "",
+                "require_managed_agents": False,
+            },
+        },
+        "local_ai": {
+            "enabled": False,
+            "provider": "openai_compatible",
+            "base_url": "http://127.0.0.1:11434/v1",
+            "model": "",
+            "api_key_env": "LOCAL_AI_API_KEY",
+            "timeout_seconds": 120,
+        },
     }
 
 
@@ -241,6 +314,14 @@ def _sample_cloud_task() -> dict[str, Any]:
         "coordinator": {
             "strategy": "decompose_and_synthesize",
             "max_child_agents": 3,
+            "managed_agents": {
+                "enabled": True,
+                "delegation_strategy": "agent_sync",
+                "include_self": False,
+                "total_agents": 4,
+                "model": "",
+                "require_managed_agents": False,
+            },
         },
         "expected_artifacts": ["report.md", "summary.md", "artifacts/"],
         "policy": {

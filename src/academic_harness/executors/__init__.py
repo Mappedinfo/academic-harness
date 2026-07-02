@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from .fake import run_fake
+from .hybrid import normalize_hybrid_outputs, run_hybrid
 from .local_control import run_local_control
 from .qoder_cli import normalize_qoder_outputs, run_qoder_cli
 from .qoder_cloud import run_qoder_cloud
@@ -21,13 +22,15 @@ def run_executor(
     run_dir: Path,
     adapter: str,
 ) -> dict[str, Any]:
-    resolved = _resolve_adapter(task, adapter)
+    resolved = resolve_executor_adapter(task, adapter)
     if resolved == "fake":
         return run_fake(project_root, task, run_id, run_dir)
     if resolved == "qoder_cli":
         return run_qoder_cli(project_root, project, task, run_id, run_dir)
     if resolved == "qoder_cloud":
         return run_qoder_cloud(project_root, project, task, run_id, run_dir)
+    if resolved == "hybrid":
+        return run_hybrid(project_root, project, task, run_id, run_dir)
     if resolved == "local_control":
         return run_local_control(project_root, project, task, run_id, run_dir)
     raise ExecutorError(f"Unsupported executor: {adapter}")
@@ -35,16 +38,20 @@ def run_executor(
 
 def normalize_executor_outputs(run_dir: Path, result: dict[str, Any]) -> list[dict[str, Any]]:
     adapter = result.get("adapter")
+    if adapter == "hybrid":
+        return normalize_hybrid_outputs(run_dir, result)
     if adapter in {"qoder", "qoder_cli", "qoder_cloud", "fake", "local_control"}:
         return normalize_qoder_outputs(run_dir, result)
     return []
 
 
-def _resolve_adapter(task: dict[str, Any], requested: str) -> str:
+def resolve_executor_adapter(task: dict[str, Any], requested: str) -> str:
     if requested == "auto":
         mode = task.get("mode")
         task_type = task.get("type")
-        if mode == "full_cloud" or task_type == "cloud_experiment":
+        if mode == "hybrid":
+            return "hybrid"
+        if mode == "full_cloud" or task_type in {"cloud_experiment", "deep_search"}:
             return "qoder_cloud"
         if mode == "local_control" or task_type == "local_control":
             return "local_control"
@@ -55,6 +62,8 @@ def _resolve_adapter(task: dict[str, Any], requested: str) -> str:
         return "qoder_cli"
     if requested in {"qoder_cloud", "cloud"}:
         return "qoder_cloud"
+    if requested in {"hybrid", "hybrid_ai"}:
+        return "hybrid"
     if requested in {"local_control", "local"}:
         return "local_control"
     if requested == "fake":
@@ -62,7 +71,9 @@ def _resolve_adapter(task: dict[str, Any], requested: str) -> str:
 
     mode = task.get("mode")
     task_type = task.get("type")
-    if mode == "full_cloud" or task_type == "cloud_experiment":
+    if mode == "hybrid":
+        return "hybrid"
+    if mode == "full_cloud" or task_type in {"cloud_experiment", "deep_search"}:
         return "qoder_cloud"
     if mode == "local_control" or task_type == "local_control":
         return "local_control"
