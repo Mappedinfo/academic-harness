@@ -4,7 +4,7 @@ import zipfile
 from pathlib import Path
 
 NAME = "academic-harness"
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 PACKAGE = "academic_harness"
 DIST_INFO = f"{PACKAGE}-{VERSION}.dist-info"
 WHEEL_NAME = f"{PACKAGE}-{VERSION}-py3-none-any.whl"

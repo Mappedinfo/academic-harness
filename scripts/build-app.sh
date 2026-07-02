@@ -47,7 +47,7 @@ cat > "$TMP_APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleVersion</key>
   <string>1</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.1.0</string>
+  <string>0.2.0</string>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
   <key>NSHighResolutionCapable</key>

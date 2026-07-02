@@ -83,7 +83,11 @@ def build_parser() -> argparse.ArgumentParser:
     task_run = task_subparsers.add_parser("run", help="run a task")
     task_run.add_argument("task_yaml", type=Path)
     task_run.add_argument("--project", type=Path, help="project root; defaults to nearest project.yaml")
-    task_run.add_argument("--adapter", choices=["qoder", "fake"], default="qoder")
+    task_run.add_argument(
+        "--adapter",
+        choices=["auto", "qoder", "qoder_cli", "qoder_cloud", "cloud", "local_control", "local", "fake"],
+        default="auto",
+    )
     task_run.add_argument("--run-id")
     task_run.set_defaults(func=_cmd_task_run)
 
@@ -114,6 +118,8 @@ def _cmd_init(args: argparse.Namespace) -> int:
     print(f"project={project_root}")
     print(f"config={project_root / 'project.yaml'}")
     print(f"sample_task={project_root / 'tasks' / 'sample_task.yaml'}")
+    print(f"sample_cloud_task={project_root / 'tasks' / 'sample_cloud_experiment.yaml'}")
+    print(f"sample_local_control_task={project_root / 'tasks' / 'sample_local_control.yaml'}")
     return 0
 
 
@@ -235,6 +241,8 @@ def _cmd_validate(args: argparse.Namespace) -> int:
 def _print_run_summary(manifest: dict[str, Any]) -> None:
     print(f"run_id={manifest['run_id']}")
     print(f"status={manifest['status']}")
+    print(f"adapter={manifest.get('adapter')}")
+    print(f"mode={manifest.get('mode')}")
     print(f"run_dir={manifest['run_dir']}")
     if manifest.get("report_path"):
         print(f"report={manifest['report_path']}")

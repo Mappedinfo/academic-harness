@@ -3,16 +3,27 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .executors import ExecutorError, normalize_executor_outputs, run_executor
 from .index import list_runs, upsert_run
 from .paths import MANIFEST_FILE, find_project_root, run_dir
 from .project import ensure_project_dirs, load_project
-from .qoder_adapter import AdapterError, normalize_qoder_outputs, run_qoder_adapter
 from .timeutil import timestamp_id, utc_now_iso
 from .validators import run_validators
 from .yamlio import load_yaml, read_json, write_json
 
 
-def run_task(task_path: Path, adapter: str = "qoder", run_id: str | None = None, project_root: Path | None = None) -> dict[str, Any]:
+SUPPORTED_TASK_TYPES = {
+    "qoder_research",
+    "cloud_experiment",
+    "local_control",
+    "lan_experiment",
+    "document_build",
+    "artifact_validation",
+}
+SUPPORTED_MODES = {"full_cloud", "local_control", "lan_control", "fake"}
+
+
+def run_task(task_path: Path, adapter: str = "auto", run_id: str | None = None, project_root: Path | None = None) -> dict[str, Any]:
     task_path = task_path.resolve()
     root, project = load_project(project_root or task_path)
     ensure_project_dirs(root)
@@ -24,10 +35,13 @@ def run_task(task_path: Path, adapter: str = "qoder", run_id: str | None = None,
     output_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = output_dir / MANIFEST_FILE
     started_at = utc_now_iso()
+    mode = task.get("mode") or _mode_for_adapter(adapter)
     manifest: dict[str, Any] = {
         "run_id": run_id,
         "project_id": project["project_id"],
         "task_id": task["task_id"],
+        "task_type": task["type"],
+        "mode": mode,
         "status": "running",
         "started_at": started_at,
         "project_root": str(root),
@@ -43,15 +57,22 @@ def run_task(task_path: Path, adapter: str = "qoder", run_id: str | None = None,
     upsert_run(root, manifest)
 
     try:
-        qoder_result = run_qoder_adapter(root, project, task, run_id, output_dir, adapter)
-        manifest["qoder"] = qoder_result
-        manifest["artifacts"] = normalize_qoder_outputs(output_dir, qoder_result)
+        executor_result = run_executor(root, project, task, run_id, output_dir, adapter)
+        manifest["executor"] = executor_result
+        manifest["qoder"] = executor_result
+        manifest["adapter"] = executor_result.get("adapter", adapter)
+        manifest["mode"] = executor_result.get("mode", mode)
+        manifest["artifacts"] = normalize_executor_outputs(output_dir, executor_result)
         _attach_primary_paths(manifest, output_dir)
         write_json(manifest_path, manifest)
 
-        manifest["validators"] = run_validators(root, output_dir, manifest_path, list(task.get("validators") or []))
-        manifest["status"] = "passed" if all(v["status"] == "passed" for v in manifest["validators"]) else "failed"
-    except (AdapterError, Exception) as error:
+        if executor_result.get("status") == "cancelled":
+            manifest["status"] = "cancelled"
+            manifest["validators"] = []
+        else:
+            manifest["validators"] = run_validators(root, output_dir, manifest_path, _local_validators(task))
+            manifest["status"] = "passed" if all(v["status"] == "passed" for v in manifest["validators"]) else "failed"
+    except (ExecutorError, Exception) as error:
         manifest["status"] = "failed"
         manifest["error"] = str(error)
     finally:
@@ -67,7 +88,7 @@ def rerun_validators(run_id: str, project_root: Path) -> dict[str, Any]:
     root = find_project_root(project_root)
     manifest_path = run_dir(root, run_id) / MANIFEST_FILE
     manifest = read_json(manifest_path)
-    validators = list((manifest.get("task") or {}).get("validators") or [])
+    validators = _local_validators(manifest.get("task") or {})
     manifest["validators"] = run_validators(root, Path(manifest["run_dir"]), manifest_path, validators)
     manifest["status"] = "passed" if all(v["status"] == "passed" for v in manifest["validators"]) else "failed"
     manifest["finished_at"] = utc_now_iso()
@@ -96,11 +117,38 @@ def _attach_primary_paths(manifest: dict[str, Any], output_dir: Path) -> None:
 
 
 def _validate_task(task: dict[str, Any], task_path: Path) -> None:
-    for key in ["task_id", "type", "input"]:
+    for key in ["task_id", "type"]:
         if key not in task:
             raise ValueError(f"Missing {key} in {task_path}")
-    if task["type"] != "qoder_research":
+    if task["type"] not in SUPPORTED_TASK_TYPES:
         raise ValueError(f"Unsupported task type: {task['type']}")
-    prompt_file = task.get("input", {}).get("prompt_file")
-    if not prompt_file:
-        raise ValueError(f"Missing input.prompt_file in {task_path}")
+    mode = task.get("mode")
+    if mode and mode not in SUPPORTED_MODES:
+        raise ValueError(f"Unsupported task mode: {mode}")
+    input_config = task.get("input") or {}
+    plan = task.get("plan") or {}
+    prompt_file = input_config.get("prompt_file") if isinstance(input_config, dict) else None
+    objective = plan.get("objective") if isinstance(plan, dict) else None
+    if not prompt_file and not objective:
+        raise ValueError(f"Missing input.prompt_file or plan.objective in {task_path}")
+
+
+def _mode_for_adapter(adapter: str) -> str:
+    if adapter == "auto":
+        return "local_control"
+    if adapter == "fake":
+        return "fake"
+    if adapter in {"qoder_cloud", "cloud"}:
+        return "full_cloud"
+    if adapter in {"local_control", "local"}:
+        return "local_control"
+    return "local_control"
+
+
+def _local_validators(task: dict[str, Any]) -> list[str]:
+    validators = task.get("validators") or []
+    if isinstance(validators, dict):
+        validators = validators.get("local") or []
+    if isinstance(validators, str):
+        return [validators]
+    return list(validators)

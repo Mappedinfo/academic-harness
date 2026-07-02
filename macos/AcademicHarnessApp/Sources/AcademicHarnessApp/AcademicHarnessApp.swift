@@ -57,10 +57,14 @@ struct ContentView: View {
             Text(model.selectedTask?.name ?? "未选择任务")
                 .foregroundStyle(.secondary)
             Spacer()
-            Button("本地测试") { model.runSelectedTask(adapter: "fake") }
+            Button("Fake 测试") { model.runSelectedTask(adapter: "fake") }
                 .disabled(!model.canRunFake)
-            Button("运行 Qoder") { model.runSelectedTask(adapter: "qoder") }
-                .disabled(!model.canRunQoder)
+            Button("本地把控") { model.runSelectedTask(adapter: "local_control") }
+                .disabled(!model.canRunLocalControl)
+            Button("全云端") { model.runSelectedTask(adapter: "qoder_cloud") }
+                .disabled(!model.canRunCloud)
+            Button("Qoder CLI") { model.runSelectedTask(adapter: "qoder") }
+                .disabled(!model.canRunQoderCLI)
             Button("取消") { model.cancel() }
                 .disabled(!model.isRunning)
             Button("验证") { model.validateSelectedRun() }
@@ -82,8 +86,13 @@ struct ContentView: View {
                 .font(.headline)
             List(selection: $model.selectedTaskID) {
                 ForEach(model.tasks) { task in
-                    Text(task.name)
-                        .tag(task.id)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(task.name)
+                        Text("\(task.type) · \(task.mode)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .tag(task.id)
                 }
             }
         }
@@ -95,7 +104,7 @@ struct ContentView: View {
             Text("运行历史")
                 .font(.headline)
             Table(model.runs, selection: $model.selectedRunID) {
-                TableColumn("Run") { run in
+                TableColumn("运行") { run in
                     Text(run.runID)
                         .font(.system(.caption, design: .monospaced))
                 }
@@ -115,7 +124,7 @@ struct ContentView: View {
             Picker("", selection: $model.selectedInspectorTab) {
                 Text("文件").tag("Files")
                 Text("任务").tag("Task")
-                Text("Prompt").tag("Prompt")
+                Text("提示词").tag("Prompt")
                 Text("设置").tag("Settings")
                 Text("日志").tag("Log")
             }
@@ -178,11 +187,11 @@ struct ContentView: View {
     private var promptEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(model.promptPathDisplay.isEmpty ? "未找到 Prompt" : model.promptPathDisplay)
+                Text(model.promptPathDisplay.isEmpty ? "未找到提示词文件" : model.promptPathDisplay)
                     .font(.headline)
                     .lineLimit(1)
                 Spacer()
-                Button("保存 Prompt") { model.savePrompt() }
+                Button("保存提示词") { model.savePrompt() }
                     .disabled(model.promptURL == nil)
             }
             TextEditor(text: $model.promptText)
@@ -195,12 +204,12 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 12) {
             qoderSettingsCard
 
-            GroupBox("LAN Worker") {
+            GroupBox("局域网 Worker") {
                 VStack(alignment: .leading, spacing: 8) {
                     Toggle("启用", isOn: $model.lanEnabled)
-                    labeledField("Server", text: $model.lanServer)
-                    labeledField("Project Root", text: $model.lanProjectRoot)
-                    labeledField("SSH Alias", text: $model.lanSSHAlias)
+                    labeledField("服务器", text: $model.lanServer)
+                    labeledField("项目根目录", text: $model.lanProjectRoot)
+                    labeledField("SSH 别名", text: $model.lanSSHAlias)
                     HStack {
                         Button("保存 LAN 配置") { model.saveLANConfig() }
                             .disabled(!model.hasProject)
@@ -255,8 +264,8 @@ struct ContentView: View {
                     .disabled(!model.hasProject || model.isRunning)
                     Button("使用系统配置") { model.resetQoderToSystem() }
                         .disabled(!model.hasProject || model.isRunning)
-                    Button("运行当前任务") { model.runSelectedTask(adapter: "qoder") }
-                        .disabled(!model.canRunQoder)
+                    Button("全云端运行") { model.runSelectedTask(adapter: "qoder_cloud") }
+                        .disabled(!model.canRunCloud)
                     Spacer()
                 }
 
@@ -340,6 +349,8 @@ struct TaskItem: Identifiable, Hashable {
     let id: String
     let name: String
     let path: URL
+    let type: String
+    let mode: String
 }
 
 struct RunItem: Identifiable, Hashable {
@@ -363,7 +374,7 @@ final class WorkbenchModel: ObservableObject {
     @Published var selectedTaskID: String?
     @Published var selectedRunID: String?
     @Published var selectedInspectorTab = "Files"
-    @Published var statusText = "Idle"
+    @Published var statusText = "空闲"
     @Published var statusColor = Color.gray
     @Published var statusItems: [StatusItem] = []
     @Published var taskText = ""
@@ -407,7 +418,15 @@ final class WorkbenchModel: ObservableObject {
         !isRunning && selectedTask != nil && hasProject
     }
 
-    var canRunQoder: Bool {
+    var canRunLocalControl: Bool {
+        canRunFake
+    }
+
+    var canRunCloud: Bool {
+        canRunFake && qoderOK
+    }
+
+    var canRunQoderCLI: Bool {
         canRunFake && qoderOK
     }
 
@@ -434,7 +453,7 @@ final class WorkbenchModel: ObservableObject {
             let runner = shortName(qoderRunnerPath.isEmpty ? qoderRunnerCommand : qoderRunnerPath)
             let config = shortName(qoderResolvedConfigPath.isEmpty ? qoderConfigPath : qoderResolvedConfigPath)
             let nextStep = selectedTask == nil ? "请先在左侧选择一个任务。" : "可以直接运行当前任务。"
-            return "已连接本机 \(runner)，使用 \(config)，Profile: \(qoderProfile)。\(nextStep)"
+            return "已连接 \(runner)，使用 \(config)，Profile: \(qoderProfile)。\(nextStep)"
         }
         return "点击“一键配置 Qoder”会安装/注册 qoder-run，并让项目回到系统自动发现模式。"
     }
@@ -495,9 +514,11 @@ final class WorkbenchModel: ObservableObject {
             "--project", projectURL.path,
             "--adapter", adapter
         ]) { [weak self] _ in
-            self?.refreshRuns()
-            self?.refreshFiles()
-            self?.refreshProjectStatus(checkLAN: false)
+            guard let self else { return }
+            self.refreshRuns()
+            self.selectedRunID = self.runs.first?.id
+            self.refreshFiles()
+            self.refreshProjectStatus(checkLAN: false)
         }
     }
 
@@ -512,7 +533,7 @@ final class WorkbenchModel: ObservableObject {
     func cancel() {
         process?.terminate()
         process = nil
-        statusText = "Cancelled"
+        statusText = "已取消"
         statusColor = .orange
         appendLog("cancelled local process")
         reload()
@@ -610,7 +631,7 @@ final class WorkbenchModel: ObservableObject {
             loadSelectedTaskFiles()
             refreshProjectStatus(checkLAN: false)
         } catch {
-            statusText = "Failed"
+            statusText = "失败"
             statusColor = .red
             appendLog("save task failed: \(error.localizedDescription)")
         }
@@ -622,7 +643,7 @@ final class WorkbenchModel: ObservableObject {
             try promptText.write(to: promptURL, atomically: true, encoding: .utf8)
             appendLog("saved prompt: \(promptURL.path)")
         } catch {
-            statusText = "Failed"
+            statusText = "失败"
             statusColor = .red
             appendLog("save prompt failed: \(error.localizedDescription)")
         }
@@ -689,7 +710,12 @@ final class WorkbenchModel: ObservableObject {
         tasks = contents
             .filter { ["yaml", "yml"].contains($0.pathExtension.lowercased()) }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
-            .map { TaskItem(id: $0.path, name: $0.lastPathComponent, path: $0) }
+            .map {
+                let text = (try? String(contentsOf: $0, encoding: .utf8)) ?? ""
+                let type = taskYAMLValue("type", in: text) ?? "task"
+                let mode = taskYAMLValue("mode", in: text) ?? "auto"
+                return TaskItem(id: $0.path, name: $0.lastPathComponent, path: $0, type: type, mode: mode)
+            }
         if selectedTaskID == nil || !tasks.contains(where: { $0.id == selectedTaskID }) {
             selectedTaskID = tasks.first?.id
         }
@@ -775,7 +801,7 @@ final class WorkbenchModel: ObservableObject {
             StatusItem(id: "project", label: "项目", ok: project.ok, message: project.ok ? "已打开" : "缺失"),
             StatusItem(id: "qoder", label: "Qoder", ok: qoder.ok, message: qoder.ok ? "已就绪" : "未配置"),
             StatusItem(id: "tasks", label: "任务", ok: tasks.ok, message: tasks.ok ? "有任务" : "无任务"),
-            StatusItem(id: "runs", label: "Runs", ok: runs.ok, message: runs.ok ? "已初始化" : "缺失"),
+            StatusItem(id: "runs", label: "运行", ok: runs.ok, message: runs.ok ? "已初始化" : "缺失"),
             StatusItem(id: "lan", label: "LAN", ok: lan.ok, message: lan.ok ? "正常" : "需检查")
         ]
 
@@ -858,6 +884,19 @@ final class WorkbenchModel: ObservableObject {
         return nil
     }
 
+    private func taskYAMLValue(_ key: String, in taskYAML: String) -> String? {
+        for line in taskYAML.split(separator: "\n", omittingEmptySubsequences: false) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("\(key):") else { continue }
+            let raw = trimmed
+                .dropFirst("\(key):".count)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            return raw.isEmpty ? nil : String(raw)
+        }
+        return nil
+    }
+
     private func runCLI(
         arguments: [String],
         currentDirectory: URL? = nil,
@@ -885,7 +924,7 @@ final class WorkbenchModel: ObservableObject {
                 guard let self else { return }
                 output.fileHandleForReading.readabilityHandler = nil
                 self.process = nil
-                self.statusText = completed.terminationStatus == 0 ? "Finished" : "Failed"
+                self.statusText = completed.terminationStatus == 0 ? "完成" : "失败"
                 self.statusColor = completed.terminationStatus == 0 ? .green : .red
                 self.appendLog("exit=\(completed.terminationStatus)")
                 completion?(completed.terminationStatus)
@@ -893,7 +932,7 @@ final class WorkbenchModel: ObservableObject {
         }
 
         do {
-            statusText = "Running"
+            statusText = "运行中"
             statusColor = .yellow
             if clearLog {
                 logText = ""
@@ -903,7 +942,7 @@ final class WorkbenchModel: ObservableObject {
             appendLog(([cliCommand] + arguments).joined(separator: " "))
         } catch {
             self.process = nil
-            statusText = "Failed"
+            statusText = "失败"
             statusColor = .red
             appendLog(error.localizedDescription)
             completion?(-1)

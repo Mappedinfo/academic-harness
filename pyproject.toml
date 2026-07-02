@@ -1,6 +1,6 @@
 [project]
 name = "academic-harness"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local-first academic harness for project tasks, Qoder runs, artifacts, and validators."
 readme = "README.md"
 requires-python = ">=3.11"

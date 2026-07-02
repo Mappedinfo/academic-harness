@@ -19,7 +19,10 @@ def init_project(project_dir: Path, force: bool = False) -> Path:
         (project_dir / folder).mkdir(parents=True, exist_ok=True)
 
     _write_if_missing(project_dir / "tasks" / "sample_prompt.md", _sample_prompt(), force)
+    _write_if_missing(project_dir / "tasks" / "sample_cloud_prompt.md", _sample_cloud_prompt(), force)
     _write_if_missing(project_dir / "tasks" / "sample_task.yaml", dump_yaml(_sample_task()), force)
+    _write_if_missing(project_dir / "tasks" / "sample_cloud_experiment.yaml", dump_yaml(_sample_cloud_task()), force)
+    _write_if_missing(project_dir / "tasks" / "sample_local_control.yaml", dump_yaml(_sample_local_control_task()), force)
     _write_if_missing(project_dir / "validators" / "validate_report.py", _validator_script(), force)
     _write_if_missing(project_dir / "manuscript" / "main.qmd", "# Manuscript\n\n", force)
     _write_if_missing(project_dir / "figures" / "registry.yaml", "figures:\n", force)
@@ -210,6 +213,7 @@ def _sample_task() -> dict[str, Any]:
     return {
         "task_id": "sample_qoder_report",
         "type": "qoder_research",
+        "mode": "local_control",
         "title": "Sample Qoder Report",
         "input": {
             "prompt_file": "tasks/sample_prompt.md",
@@ -225,10 +229,64 @@ def _sample_task() -> dict[str, Any]:
     }
 
 
+def _sample_cloud_task() -> dict[str, Any]:
+    return {
+        "task_id": "sample_cloud_experiment",
+        "type": "cloud_experiment",
+        "mode": "full_cloud",
+        "title": "Sample Full Cloud Experiment",
+        "input": {
+            "prompt_file": "tasks/sample_cloud_prompt.md",
+        },
+        "coordinator": {
+            "strategy": "decompose_and_synthesize",
+            "max_child_agents": 3,
+        },
+        "expected_artifacts": ["report.md", "summary.md", "artifacts/"],
+        "policy": {
+            "allow_cloud_web": True,
+            "allow_private_data": False,
+            "local_agent_allowed": False,
+        },
+        "validators": {
+            "local": ["validators/validate_report.py"],
+            "cloud": [],
+        },
+    }
+
+
+def _sample_local_control_task() -> dict[str, Any]:
+    return {
+        "task_id": "sample_local_control_plan",
+        "type": "local_control",
+        "mode": "local_control",
+        "title": "Sample Local Control Plan",
+        "plan": {
+            "objective": "Create a local control plan before dispatching a research task to Qoder Cloud.",
+        },
+        "output": {
+            "expected": ["report.md", "summary.md", "artifacts/local_control_plan.json"],
+        },
+        "policy": {
+            "allow_cloud_web": False,
+            "allow_private_data": False,
+        },
+        "validators": ["validators/validate_report.py"],
+    }
+
+
 def _sample_prompt() -> str:
     return (
         "Write a concise research note about what an academic harness should track. "
         "Include artifact provenance, validation, and reproducibility.\n"
+    )
+
+
+def _sample_cloud_prompt() -> str:
+    return (
+        "Design a small academic experiment plan for comparing inference-time scaling "
+        "with larger pretrained models on reasoning tasks. Include decomposition, "
+        "evidence to collect, expected artifacts, validation checks, and limitations.\n"
     )
 
 
