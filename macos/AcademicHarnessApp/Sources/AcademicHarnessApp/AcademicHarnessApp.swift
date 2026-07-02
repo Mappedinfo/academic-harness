@@ -18,7 +18,6 @@ struct ContentView: View {
         VStack(spacing: 10) {
             header
             statusRow
-            controls
             mainSplit
         }
         .padding(14)
@@ -52,32 +51,21 @@ struct ContentView: View {
         }
     }
 
-    private var controls: some View {
-        HStack(spacing: 8) {
-            Text(model.selectedTask?.name ?? "未选择任务")
-                .foregroundStyle(.secondary)
-            Spacer()
-            Button("Fake 测试") { model.runSelectedTask(adapter: "fake") }
-                .disabled(!model.canRunFake)
-            Button("本地把控") { model.runSelectedTask(adapter: "local_control") }
-                .disabled(!model.canRunLocalControl)
-            Button("全云端") { model.runSelectedTask(adapter: "qoder_cloud") }
-                .disabled(!model.canRunCloud)
-            Button("Qoder CLI") { model.runSelectedTask(adapter: "qoder") }
-                .disabled(!model.canRunQoderCLI)
-            Button("取消") { model.cancel() }
-                .disabled(!model.isRunning)
-            Button("验证") { model.validateSelectedRun() }
-                .disabled(model.selectedRun == nil || model.isRunning)
+    private var mainSplit: some View {
+        HSplitView {
+            leftSidebar
+            promptWorkbench
+            rightWorkbench
         }
     }
 
-    private var mainSplit: some View {
-        HSplitView {
+    private var leftSidebar: some View {
+        VStack(spacing: 10) {
             taskList
+            Divider()
             runList
-            inspector
         }
+        .frame(minWidth: 260)
     }
 
     private var taskList: some View {
@@ -96,7 +84,7 @@ struct ContentView: View {
                 }
             }
         }
-        .frame(minWidth: 220)
+        .frame(minHeight: 240)
     }
 
     private var runList: some View {
@@ -116,15 +104,40 @@ struct ContentView: View {
                 }
             }
         }
-        .frame(minWidth: 360)
+        .frame(minHeight: 280)
     }
 
-    private var inspector: some View {
-        VStack(spacing: 8) {
+    private var promptWorkbench: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("任务描述 / 提示词")
+                        .font(.headline)
+                    Text(model.promptPathDisplay.isEmpty ? "选择左侧任务后编辑提示词" : model.promptPathDisplay)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Button("保存") { _ = model.savePrompt() }
+                    .disabled(!model.canSavePrompt)
+            }
+            TextEditor(text: $model.promptText)
+                .font(.system(.body, design: .monospaced))
+                .overlay(editorBorder)
+                .frame(minHeight: 520)
+        }
+        .frame(minWidth: 460)
+    }
+
+    private var rightWorkbench: some View {
+        VStack(spacing: 10) {
+            runOptionsPanel
+            qoderStatusPanel
+            lanStatusPanel
             Picker("", selection: $model.selectedInspectorTab) {
                 Text("文件").tag("Files")
-                Text("任务").tag("Task")
-                Text("提示词").tag("Prompt")
+                Text("高级任务").tag("Task")
                 Text("设置").tag("Settings")
                 Text("日志").tag("Log")
             }
@@ -134,8 +147,6 @@ struct ContentView: View {
             switch model.selectedInspectorTab {
             case "Task":
                 taskEditor
-            case "Prompt":
-                promptEditor
             case "Settings":
                 settingsView
             case "Log":
@@ -144,7 +155,85 @@ struct ContentView: View {
                 filesView
             }
         }
-        .frame(minWidth: 440)
+        .frame(minWidth: 380)
+    }
+
+    private var runOptionsPanel: some View {
+        GroupBox("运行") {
+            VStack(alignment: .leading, spacing: 10) {
+                Picker("运行模式", selection: $model.runMode) {
+                    ForEach(RunMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text(model.runModeDetail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack {
+                    Button("启动运行") { model.startRun() }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .keyboardShortcut(.return, modifiers: [.command])
+                        .disabled(!model.canStartRun)
+                    Button("取消") { model.cancel() }
+                        .disabled(!model.isRunning)
+                    Button("验证") { model.validateSelectedRun() }
+                        .disabled(model.selectedRun == nil || model.isRunning)
+                    Spacer()
+                }
+
+                Text(model.startReadinessText)
+                    .font(.caption)
+                    .foregroundStyle(model.canStartRun ? .green : .orange)
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private var qoderStatusPanel: some View {
+        GroupBox("Qoder") {
+            HStack(alignment: .top, spacing: 8) {
+                Circle()
+                    .fill(model.qoderOK ? Color.green : Color.red)
+                    .frame(width: 10, height: 10)
+                    .padding(.top, 4)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(model.qoderStatusTitle)
+                        .font(.headline)
+                    Text(model.qoderStatusDetail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private var lanStatusPanel: some View {
+        GroupBox("LAN") {
+            HStack(alignment: .top, spacing: 8) {
+                Circle()
+                    .fill(model.lanOK ? Color.green : Color.orange)
+                    .frame(width: 10, height: 10)
+                    .padding(.top, 4)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(model.lanEnabled ? "LAN 已启用" : "LAN 未启用")
+                        .font(.headline)
+                    Text(model.lanMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+            }
+            .padding(.vertical, 4)
+        }
     }
 
     private var filesView: some View {
@@ -179,22 +268,6 @@ struct ContentView: View {
                     .disabled(model.selectedTask == nil)
             }
             TextEditor(text: $model.taskText)
-                .font(.system(.body, design: .monospaced))
-                .overlay(editorBorder)
-        }
-    }
-
-    private var promptEditor: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(model.promptPathDisplay.isEmpty ? "未找到提示词文件" : model.promptPathDisplay)
-                    .font(.headline)
-                    .lineLimit(1)
-                Spacer()
-                Button("保存提示词") { model.savePrompt() }
-                    .disabled(model.promptURL == nil)
-            }
-            TextEditor(text: $model.promptText)
                 .font(.system(.body, design: .monospaced))
                 .overlay(editorBorder)
         }
@@ -264,8 +337,6 @@ struct ContentView: View {
                     .disabled(!model.hasProject || model.isRunning)
                     Button("使用系统配置") { model.resetQoderToSystem() }
                         .disabled(!model.hasProject || model.isRunning)
-                    Button("全云端运行") { model.runSelectedTask(adapter: "qoder_cloud") }
-                        .disabled(!model.canRunCloud)
                     Spacer()
                 }
 
@@ -364,6 +435,58 @@ struct RunItem: Identifiable, Hashable {
     let manifestPath: URL
 }
 
+enum RunMode: String, CaseIterable, Identifiable {
+    case fullCloud
+    case localControl
+    case fake
+    case qoderCLI
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .fullCloud:
+            return "全云端"
+        case .localControl:
+            return "本地把控"
+        case .fake:
+            return "Fake 测试"
+        case .qoderCLI:
+            return "Qoder CLI"
+        }
+    }
+
+    var adapter: String {
+        switch self {
+        case .fullCloud:
+            return "qoder_cloud"
+        case .localControl:
+            return "local_control"
+        case .fake:
+            return "fake"
+        case .qoderCLI:
+            return "qoder"
+        }
+    }
+
+    var requiresQoder: Bool {
+        self == .fullCloud || self == .qoderCLI
+    }
+
+    var detail: String {
+        switch self {
+        case .fullCloud:
+            return "本地只提交任务和收取 artifacts，实际调研与拆解由 Qoder Cloud Agent 完成。"
+        case .localControl:
+            return "本地生成控制计划和检查材料，不启动远程云端运行。"
+        case .fake:
+            return "离线生成 fixture 输出，用于检查项目、UI 和 validator 是否能跑通。"
+        case .qoderCLI:
+            return "通过已注册的 qoder-run CLI 兼容路径运行。"
+        }
+    }
+}
+
 @MainActor
 final class WorkbenchModel: ObservableObject {
     @Published var projectPath = ""
@@ -374,12 +497,14 @@ final class WorkbenchModel: ObservableObject {
     @Published var selectedTaskID: String?
     @Published var selectedRunID: String?
     @Published var selectedInspectorTab = "Files"
+    @Published var runMode: RunMode = .localControl
     @Published var statusText = "空闲"
     @Published var statusColor = Color.gray
     @Published var statusItems: [StatusItem] = []
     @Published var taskText = ""
     @Published var promptText = ""
     @Published var promptPathDisplay = ""
+    @Published var promptUsesTaskObjective = false
     @Published var logText = ""
     @Published var qoderOK = false
     @Published var qoderMessage = "未加载项目"
@@ -414,20 +539,36 @@ final class WorkbenchModel: ObservableObject {
         FileManager.default.fileExists(atPath: projectURL.appendingPathComponent("project.yaml").path)
     }
 
-    var canRunFake: Bool {
+    var canRunBase: Bool {
         !isRunning && selectedTask != nil && hasProject
     }
 
-    var canRunLocalControl: Bool {
-        canRunFake
+    var canStartRun: Bool {
+        canRunBase && (!runMode.requiresQoder || qoderOK)
     }
 
-    var canRunCloud: Bool {
-        canRunFake && qoderOK
+    var canSavePrompt: Bool {
+        selectedTask != nil && (promptURL != nil || promptUsesTaskObjective)
     }
 
-    var canRunQoderCLI: Bool {
-        canRunFake && qoderOK
+    var runModeDetail: String {
+        runMode.detail
+    }
+
+    var startReadinessText: String {
+        if isRunning {
+            return "正在运行中"
+        }
+        if !hasProject {
+            return "请先创建或选择项目"
+        }
+        if selectedTask == nil {
+            return "请先选择任务"
+        }
+        if runMode.requiresQoder && !qoderOK {
+            return "当前模式需要 Qoder 配置就绪"
+        }
+        return "将以“\(runMode.title)”启动当前任务"
     }
 
     var selectedTask: TaskItem? {
@@ -452,7 +593,7 @@ final class WorkbenchModel: ObservableObject {
         if qoderOK {
             let runner = shortName(qoderRunnerPath.isEmpty ? qoderRunnerCommand : qoderRunnerPath)
             let config = shortName(qoderResolvedConfigPath.isEmpty ? qoderConfigPath : qoderResolvedConfigPath)
-            let nextStep = selectedTask == nil ? "请先在左侧选择一个任务。" : "可以直接运行当前任务。"
+            let nextStep = selectedTask == nil ? "请先在左侧选择一个任务。" : "选择运行模式后点击“启动运行”。"
             return "已连接 \(runner)，使用 \(config)，Profile: \(qoderProfile)。\(nextStep)"
         }
         return "点击“一键配置 Qoder”会安装/注册 qoder-run，并让项目回到系统自动发现模式。"
@@ -507,7 +648,13 @@ final class WorkbenchModel: ObservableObject {
         refreshProjectStatus(checkLAN: false)
     }
 
-    func runSelectedTask(adapter: String) {
+    func startRun() {
+        guard canStartRun else { return }
+        guard savePrompt() else { return }
+        runSelectedTask(adapter: runMode.adapter)
+    }
+
+    private func runSelectedTask(adapter: String) {
         guard let task = selectedTask else { return }
         runCLI(arguments: [
             "task", "run", task.path.path,
@@ -637,15 +784,30 @@ final class WorkbenchModel: ObservableObject {
         }
     }
 
-    func savePrompt() {
-        guard let promptURL else { return }
+    @discardableResult
+    func savePrompt() -> Bool {
+        guard let task = selectedTask else { return false }
         do {
-            try promptText.write(to: promptURL, atomically: true, encoding: .utf8)
-            appendLog("saved prompt: \(promptURL.path)")
+            if let promptURL {
+                try promptText.write(to: promptURL, atomically: true, encoding: .utf8)
+                appendLog("saved prompt: \(promptURL.path)")
+            } else if promptUsesTaskObjective {
+                taskText = updateObjective(in: taskText, with: promptText)
+                try taskText.write(to: task.path, atomically: true, encoding: .utf8)
+                appendLog("saved objective: \(task.path.path)")
+                refreshTasks()
+            } else {
+                statusText = "失败"
+                statusColor = .red
+                appendLog("save prompt failed: no prompt_file or plan.objective")
+                return false
+            }
+            return true
         } catch {
             statusText = "失败"
             statusColor = .red
             appendLog("save prompt failed: \(error.localizedDescription)")
+            return false
         }
     }
 
@@ -687,16 +849,20 @@ final class WorkbenchModel: ObservableObject {
             promptText = ""
             promptPathDisplay = ""
             promptURL = nil
+            promptUsesTaskObjective = false
             return
         }
         taskText = (try? String(contentsOf: task.path, encoding: .utf8)) ?? ""
+        runMode = defaultRunMode(for: task)
         promptURL = resolvePromptURL(from: taskText)
         if let promptURL {
+            promptUsesTaskObjective = false
             promptPathDisplay = promptURL.path
             promptText = (try? String(contentsOf: promptURL, encoding: .utf8)) ?? ""
         } else {
-            promptPathDisplay = ""
-            promptText = ""
+            promptUsesTaskObjective = true
+            promptPathDisplay = "任务 YAML: plan.objective"
+            promptText = taskYAMLValue("objective", in: taskText) ?? ""
         }
     }
 
@@ -884,6 +1050,16 @@ final class WorkbenchModel: ObservableObject {
         return nil
     }
 
+    private func defaultRunMode(for task: TaskItem) -> RunMode {
+        if task.mode == "full_cloud" || task.type == "cloud_experiment" {
+            return .fullCloud
+        }
+        if task.mode == "fake" {
+            return .fake
+        }
+        return .localControl
+    }
+
     private func taskYAMLValue(_ key: String, in taskYAML: String) -> String? {
         for line in taskYAML.split(separator: "\n", omittingEmptySubsequences: false) {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -895,6 +1071,56 @@ final class WorkbenchModel: ObservableObject {
             return raw.isEmpty ? nil : String(raw)
         }
         return nil
+    }
+
+    private func updateObjective(in taskYAML: String, with objective: String) -> String {
+        var lines = taskYAML.components(separatedBy: "\n")
+        for index in lines.indices {
+            let trimmed = lines[index].trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("objective:") else { continue }
+            let indent = leadingWhitespace(in: lines[index])
+            let replacement = yamlBlockLines(key: "objective", indent: indent, value: objective)
+            var end = index + 1
+            while end < lines.count {
+                let candidate = lines[end]
+                if candidate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    end += 1
+                    continue
+                }
+                if leadingWhitespace(in: candidate).count <= indent.count {
+                    break
+                }
+                end += 1
+            }
+            lines.replaceSubrange(index..<end, with: replacement)
+            return lines.joined(separator: "\n")
+        }
+
+        for index in lines.indices {
+            let trimmed = lines[index].trimmingCharacters(in: .whitespaces)
+            guard trimmed == "plan:" else { continue }
+            let indent = leadingWhitespace(in: lines[index]) + "  "
+            lines.insert(contentsOf: yamlBlockLines(key: "objective", indent: indent, value: objective), at: index + 1)
+            return lines.joined(separator: "\n")
+        }
+
+        var output = taskYAML
+        if !output.hasSuffix("\n") {
+            output += "\n"
+        }
+        output += "plan:\n"
+        output += yamlBlockLines(key: "objective", indent: "  ", value: objective).joined(separator: "\n")
+        output += "\n"
+        return output
+    }
+
+    private func yamlBlockLines(key: String, indent: String, value: String) -> [String] {
+        let lines = value.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        return ["\(indent)\(key): |"] + (lines.isEmpty ? ["\(indent)  "] : lines.map { "\(indent)  \($0)" })
+    }
+
+    private func leadingWhitespace(in value: String) -> String {
+        String(value.prefix { $0 == " " || $0 == "\t" })
     }
 
     private func runCLI(
