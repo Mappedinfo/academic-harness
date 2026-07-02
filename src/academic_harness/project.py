@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +28,73 @@ def init_project(project_dir: Path, force: bool = False) -> Path:
     return project_dir
 
 
+def project_status(project_dir: Path, check_lan: bool = False) -> dict[str, Any]:
+    project_dir = project_dir.resolve()
+    project_file = project_dir / PROJECT_FILE
+    status: dict[str, Any] = {
+        "project_root": str(project_dir),
+        "ok": False,
+        "checks": {},
+    }
+
+    project_exists = project_file.exists()
+    status["checks"]["project"] = {
+        "ok": project_exists,
+        "path": str(project_file),
+        "message": "project.yaml found" if project_exists else "project.yaml missing",
+    }
+    if not project_exists:
+        status["checks"]["tasks"] = {"ok": False, "message": "project.yaml missing"}
+        status["checks"]["runs"] = {"ok": False, "message": "project.yaml missing"}
+        status["checks"]["qoder"] = {"ok": False, "message": "project.yaml missing"}
+        status["checks"]["lan"] = {"ok": False, "message": "project.yaml missing"}
+        return status
+
+    project = load_yaml(project_file)
+    tasks_dir = project_dir / str((project.get("local") or {}).get("tasks_dir") or "tasks")
+    runs_path = project_dir / WORKBENCH_DIR / "runs"
+    tasks_ok = tasks_dir.exists() and any(tasks_dir.glob("*.yaml"))
+    status["checks"]["tasks"] = {
+        "ok": tasks_ok,
+        "path": str(tasks_dir),
+        "message": "task yaml found" if tasks_ok else "no task yaml found",
+    }
+    status["checks"]["runs"] = {
+        "ok": runs_path.exists(),
+        "path": str(runs_path),
+        "message": "runs directory found" if runs_path.exists() else "runs directory missing",
+    }
+    status["checks"]["qoder"] = _qoder_status(project_dir, project)
+    status["checks"]["lan"] = _lan_status(project, check_lan=check_lan)
+    status["ok"] = all(
+        status["checks"][name]["ok"]
+        for name in ["project", "tasks", "runs"]
+    )
+    return status
+
+
+def set_lan_config(
+    project_dir: Path,
+    server: str | None,
+    project_root: str | None,
+    ssh_alias: str | None,
+    enabled: bool | None,
+) -> dict[str, Any]:
+    root, project = load_project(project_dir)
+    lan = dict(project.get("lan") or {})
+    if server is not None:
+        lan["server"] = server
+    if project_root is not None:
+        lan["project_root"] = project_root
+    if ssh_alias is not None:
+        lan["ssh_alias"] = ssh_alias
+    if enabled is not None:
+        lan["enabled"] = enabled
+    project["lan"] = lan
+    (root / PROJECT_FILE).write_text(dump_yaml(project), encoding="utf-8")
+    return project_status(root, check_lan=False)
+
+
 def load_project(path: Path) -> tuple[Path, dict[str, Any]]:
     root = find_project_root(path)
     return root, load_yaml(root / PROJECT_FILE)
@@ -37,6 +106,115 @@ def ensure_project_dirs(project_root: Path) -> None:
     workbench_dir(project_root).mkdir(parents=True, exist_ok=True)
     (workbench_dir(project_root) / "runs").mkdir(parents=True, exist_ok=True)
     init_index(project_root)
+
+
+def _qoder_status(project_dir: Path, project: dict[str, Any]) -> dict[str, Any]:
+    qoder = project.get("qoder") or {}
+    runner_command = str(qoder.get("runner_command") or "").strip()
+    config_value = str(qoder.get("config") or "").strip()
+    messages: list[str] = []
+
+    if not runner_command:
+        return {"ok": False, "message": "qoder.runner_command missing"}
+
+    runner_path = _resolve_command(runner_command)
+    runner_ok = runner_path is not None
+    if runner_ok:
+        messages.append(f"runner found: {runner_path}")
+    else:
+        messages.append(f"runner not found: {runner_command}")
+
+    config_ok = True
+    config_path = None
+    if config_value:
+        config_path = _resolve_project_path(project_dir, config_value)
+        config_ok = config_path.exists()
+        messages.append("config found" if config_ok else f"config missing: {config_path}")
+
+    help_ok = False
+    if runner_ok:
+        try:
+            completed = subprocess.run(
+                [runner_path, "--help"],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+            help_ok = completed.returncode == 0
+            messages.append("runner --help ok" if help_ok else "runner --help failed")
+        except Exception as error:
+            messages.append(f"runner --help error: {error}")
+
+    return {
+        "ok": runner_ok and config_ok and help_ok,
+        "runner_command": runner_command,
+        "runner_path": runner_path,
+        "config_path": str(config_path) if config_path else None,
+        "profile": qoder.get("profile") or "default",
+        "message": "; ".join(messages),
+    }
+
+
+def _lan_status(project: dict[str, Any], check_lan: bool) -> dict[str, Any]:
+    lan = project.get("lan") or {}
+    enabled = bool(lan.get("enabled", False))
+    server = str(lan.get("server") or "").strip()
+    project_root = str(lan.get("project_root") or "").strip()
+    ssh_alias = str(lan.get("ssh_alias") or "").strip()
+
+    if not enabled:
+        return {
+            "ok": True,
+            "enabled": False,
+            "server": server,
+            "project_root": project_root,
+            "ssh_alias": ssh_alias,
+            "message": "LAN disabled",
+        }
+
+    configured = bool(server and project_root)
+    result: dict[str, Any] = {
+        "ok": configured,
+        "enabled": True,
+        "server": server,
+        "project_root": project_root,
+        "ssh_alias": ssh_alias,
+        "message": "LAN configured" if configured else "LAN enabled but server/project_root missing",
+    }
+    if check_lan and ssh_alias:
+        try:
+            completed = subprocess.run(
+                ["ssh", ssh_alias, "true"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=8,
+            )
+            result["ssh_ok"] = completed.returncode == 0
+            result["ok"] = configured and completed.returncode == 0
+            result["message"] = "LAN ssh check ok" if completed.returncode == 0 else "LAN ssh check failed"
+        except Exception as error:
+            result["ssh_ok"] = False
+            result["ok"] = False
+            result["message"] = f"LAN ssh check error: {error}"
+    return result
+
+
+def _resolve_project_path(project_dir: Path, value: str) -> Path:
+    path = Path(value)
+    return path if path.is_absolute() else project_dir / path
+
+
+def _resolve_command(command: str) -> str | None:
+    command = command.strip()
+    if not command:
+        return None
+    path = Path(command)
+    if path.is_absolute() or "/" in command:
+        return str(path) if path.exists() else None
+    return shutil.which(command)
 
 
 def _write_if_missing(path: Path, content: str, force: bool) -> None:

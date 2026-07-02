@@ -49,6 +49,28 @@ class CLITests(unittest.TestCase):
             self.assertIn("run_id=run_cli", run.stdout)
             self.assertTrue((project / ".workbench" / "runs" / "run_cli" / "manifest.json").exists())
 
+            status = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "academic_harness",
+                    "project",
+                    "status",
+                    "--project",
+                    str(project),
+                    "--json",
+                ],
+                cwd=repo_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(status.returncode, 0, status.stderr)
+            self.assertIn('"project"', status.stdout)
+            self.assertIn('"qoder"', status.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

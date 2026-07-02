@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .project import init_project
+from .project import init_project, project_status, set_lan_config
 from .runs import list_project_runs, rerun_validators, run_task, show_run
 
 
@@ -28,6 +28,22 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser.add_argument("project_dir", type=Path)
     init_parser.add_argument("--force", action="store_true", help="overwrite template files")
     init_parser.set_defaults(func=_cmd_init)
+
+    project_parser = subparsers.add_parser("project", help="project commands")
+    project_subparsers = project_parser.add_subparsers(dest="project_command", required=True)
+    project_status_parser = project_subparsers.add_parser("status", help="check project configuration")
+    project_status_parser.add_argument("--project", required=True, type=Path)
+    project_status_parser.add_argument("--json", action="store_true")
+    project_status_parser.add_argument("--check-lan", action="store_true")
+    project_status_parser.set_defaults(func=_cmd_project_status)
+
+    project_lan = project_subparsers.add_parser("set-lan", help="write LAN worker config")
+    project_lan.add_argument("--project", required=True, type=Path)
+    project_lan.add_argument("--server")
+    project_lan.add_argument("--project-root")
+    project_lan.add_argument("--ssh-alias")
+    project_lan.add_argument("--enabled", choices=["true", "false"])
+    project_lan.set_defaults(func=_cmd_project_set_lan)
 
     task_parser = subparsers.add_parser("task", help="task commands")
     task_subparsers = task_parser.add_subparsers(dest="task_command", required=True)
@@ -65,6 +81,31 @@ def _cmd_init(args: argparse.Namespace) -> int:
     print(f"project={project_root}")
     print(f"config={project_root / 'project.yaml'}")
     print(f"sample_task={project_root / 'tasks' / 'sample_task.yaml'}")
+    return 0
+
+
+def _cmd_project_status(args: argparse.Namespace) -> int:
+    status = project_status(args.project, check_lan=args.check_lan)
+    if args.json:
+        print(json.dumps(status, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        print(f"project={status['project_root']}")
+        for name, check in status["checks"].items():
+            mark = "ok" if check.get("ok") else "fail"
+            print(f"{name}={mark} {check.get('message', '')}")
+    return 0
+
+
+def _cmd_project_set_lan(args: argparse.Namespace) -> int:
+    enabled = None if args.enabled is None else args.enabled == "true"
+    status = set_lan_config(
+        args.project,
+        server=args.server,
+        project_root=args.project_root,
+        ssh_alias=args.ssh_alias,
+        enabled=enabled,
+    )
+    print(json.dumps(status, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
 
 

@@ -6,7 +6,7 @@ struct AcademicHarnessMacApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .frame(minWidth: 1040, minHeight: 680)
+                .frame(minWidth: 1180, minHeight: 760)
         }
     }
 }
@@ -15,105 +15,270 @@ struct ContentView: View {
     @StateObject private var model = WorkbenchModel()
 
     var body: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 10) {
-                Circle()
-                    .fill(model.statusColor)
-                    .frame(width: 12, height: 12)
-                Text(model.statusText)
-                    .font(.headline)
-                TextField("Project path", text: $model.projectPath)
-                    .textFieldStyle(.roundedBorder)
-                Button("Choose") { model.chooseProject() }
-                Button("Reload") { model.reload() }
-            }
-
-            HStack(spacing: 8) {
-                Text("CLI")
-                    .foregroundStyle(.secondary)
-                TextField("academic-harness", text: $model.cliCommand)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 220)
-                Picker("Adapter", selection: $model.adapter) {
-                    Text("qoder").tag("qoder")
-                    Text("fake").tag("fake")
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 180)
-                Spacer()
-                Button("Run") { model.runSelectedTask() }
-                    .disabled(!model.canRun)
-                Button("Cancel") { model.cancel() }
-                    .disabled(!model.isRunning)
-                Button("Validate") { model.validateSelectedRun() }
-                    .disabled(model.selectedRun == nil || model.isRunning)
-            }
-
-            HSplitView {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Tasks")
-                        .font(.headline)
-                    List(selection: $model.selectedTaskID) {
-                        ForEach(model.tasks) { task in
-                            Text(task.name)
-                                .tag(task.id)
-                        }
-                    }
-                    .frame(minWidth: 240)
-                }
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Runs")
-                        .font(.headline)
-                    Table(model.runs, selection: $model.selectedRunID) {
-                        TableColumn("Run") { run in
-                            Text(run.runID)
-                                .font(.system(.caption, design: .monospaced))
-                        }
-                        TableColumn("Status") { run in
-                            Text(run.status)
-                        }
-                        TableColumn("Task") { run in
-                            Text(run.taskID)
-                        }
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Files")
-                            .font(.headline)
-                        Spacer()
-                        Button("Open Report") { model.openReport() }
-                            .disabled(model.selectedRun?.reportPath == nil)
-                        Button("Open Summary") { model.openSummary() }
-                            .disabled(model.selectedRun?.summaryPath == nil)
-                        Button("Reveal") { model.revealRun() }
-                            .disabled(model.selectedRun == nil)
-                    }
-
-                    List(model.files, id: \.path) { file in
-                        Button(file.lastPathComponent) {
-                            NSWorkspace.shared.open(file)
-                        }
-                        .buttonStyle(.plain)
-                    }
-
-                    TextEditor(text: $model.logText)
-                        .font(.system(.caption, design: .monospaced))
-                        .frame(minHeight: 160)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6)
-                                .stroke(Color.secondary.opacity(0.25))
-                        )
-                }
-                .frame(minWidth: 360)
-            }
+        VStack(spacing: 10) {
+            header
+            statusRow
+            controls
+            mainSplit
         }
-        .padding(16)
+        .padding(14)
         .onAppear { model.reload() }
+        .onChange(of: model.selectedTaskID) { _ in model.loadSelectedTaskFiles() }
         .onChange(of: model.selectedRunID) { _ in model.refreshFiles() }
     }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(model.statusColor)
+                .frame(width: 12, height: 12)
+            Text(model.statusText)
+                .font(.headline)
+                .frame(width: 92, alignment: .leading)
+            TextField("Project path", text: $model.projectPath)
+                .textFieldStyle(.roundedBorder)
+            Button("Create Project") { model.createProject() }
+            Button("Choose") { model.chooseProject() }
+            Button("Reload") { model.reload() }
+        }
+    }
+
+    private var statusRow: some View {
+        HStack(spacing: 8) {
+            ForEach(model.statusItems) { item in
+                StatusPill(item: item)
+            }
+            Spacer()
+        }
+    }
+
+    private var controls: some View {
+        HStack(spacing: 8) {
+            Text("CLI")
+                .foregroundStyle(.secondary)
+            TextField("academic-harness", text: $model.cliCommand)
+                .textFieldStyle(.roundedBorder)
+                .frame(minWidth: 240)
+            Spacer()
+            Button("Run Fake") { model.runSelectedTask(adapter: "fake") }
+                .disabled(!model.canRunFake)
+            Button("Run Qoder") { model.runSelectedTask(adapter: "qoder") }
+                .disabled(!model.canRunQoder)
+            Button("Cancel") { model.cancel() }
+                .disabled(!model.isRunning)
+            Button("Validate") { model.validateSelectedRun() }
+                .disabled(model.selectedRun == nil || model.isRunning)
+        }
+    }
+
+    private var mainSplit: some View {
+        HSplitView {
+            taskList
+            runList
+            inspector
+        }
+    }
+
+    private var taskList: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Tasks")
+                .font(.headline)
+            List(selection: $model.selectedTaskID) {
+                ForEach(model.tasks) { task in
+                    Text(task.name)
+                        .tag(task.id)
+                }
+            }
+        }
+        .frame(minWidth: 220)
+    }
+
+    private var runList: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Runs")
+                .font(.headline)
+            Table(model.runs, selection: $model.selectedRunID) {
+                TableColumn("Run") { run in
+                    Text(run.runID)
+                        .font(.system(.caption, design: .monospaced))
+                }
+                TableColumn("Status") { run in
+                    Text(run.status)
+                }
+                TableColumn("Task") { run in
+                    Text(run.taskID)
+                }
+            }
+        }
+        .frame(minWidth: 360)
+    }
+
+    private var inspector: some View {
+        VStack(spacing: 8) {
+            Picker("Inspector", selection: $model.selectedInspectorTab) {
+                Text("Files").tag("Files")
+                Text("Task").tag("Task")
+                Text("Prompt").tag("Prompt")
+                Text("Settings").tag("Settings")
+                Text("Log").tag("Log")
+            }
+            .pickerStyle(.segmented)
+
+            switch model.selectedInspectorTab {
+            case "Task":
+                taskEditor
+            case "Prompt":
+                promptEditor
+            case "Settings":
+                settingsView
+            case "Log":
+                logView
+            default:
+                filesView
+            }
+        }
+        .frame(minWidth: 440)
+    }
+
+    private var filesView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Files")
+                    .font(.headline)
+                Spacer()
+                Button("Open Report") { model.openReport() }
+                    .disabled(model.selectedRun?.reportPath == nil)
+                Button("Open Summary") { model.openSummary() }
+                    .disabled(model.selectedRun?.summaryPath == nil)
+                Button("Reveal") { model.revealRun() }
+                    .disabled(model.selectedRun == nil)
+            }
+            List(model.files, id: \.path) { file in
+                Button(file.lastPathComponent) {
+                    NSWorkspace.shared.open(file)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var taskEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(model.selectedTask?.name ?? "No Task")
+                    .font(.headline)
+                Spacer()
+                Button("Save Task") { model.saveTask() }
+                    .disabled(model.selectedTask == nil)
+            }
+            TextEditor(text: $model.taskText)
+                .font(.system(.body, design: .monospaced))
+                .overlay(editorBorder)
+        }
+    }
+
+    private var promptEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(model.promptPathDisplay.isEmpty ? "No Prompt" : model.promptPathDisplay)
+                    .font(.headline)
+                    .lineLimit(1)
+                Spacer()
+                Button("Save Prompt") { model.savePrompt() }
+                    .disabled(model.promptURL == nil)
+            }
+            TextEditor(text: $model.promptText)
+                .font(.system(.body, design: .monospaced))
+                .overlay(editorBorder)
+        }
+    }
+
+    private var settingsView: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            GroupBox("Qoder") {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(model.qoderMessage)
+                        .font(.caption)
+                        .foregroundStyle(model.qoderOK ? .green : .red)
+                    Button("Open Project YAML") { model.openProjectYAML() }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 4)
+            }
+
+            GroupBox("LAN Worker") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("Enabled", isOn: $model.lanEnabled)
+                    labeledField("Server", text: $model.lanServer)
+                    labeledField("Project Root", text: $model.lanProjectRoot)
+                    labeledField("SSH Alias", text: $model.lanSSHAlias)
+                    HStack {
+                        Button("Save LAN Config") { model.saveLANConfig() }
+                            .disabled(!model.hasProject)
+                        Button("Check LAN") { model.checkLAN() }
+                            .disabled(!model.hasProject)
+                        Spacer()
+                    }
+                    Text(model.lanMessage)
+                        .font(.caption)
+                        .foregroundStyle(model.lanOK ? .green : .orange)
+                }
+                .padding(.vertical, 4)
+            }
+            Spacer()
+        }
+        .padding(.top, 4)
+    }
+
+    private var logView: some View {
+        TextEditor(text: $model.logText)
+            .font(.system(.caption, design: .monospaced))
+            .overlay(editorBorder)
+    }
+
+    private var editorBorder: some View {
+        RoundedRectangle(cornerRadius: 6)
+            .stroke(Color.secondary.opacity(0.25))
+    }
+
+    private func labeledField(_ label: String, text: Binding<String>) -> some View {
+        HStack {
+            Text(label)
+                .frame(width: 96, alignment: .trailing)
+                .foregroundStyle(.secondary)
+            TextField(label, text: text)
+                .textFieldStyle(.roundedBorder)
+        }
+    }
+}
+
+struct StatusPill: View {
+    let item: StatusItem
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(item.ok ? Color.green : Color.red)
+                .frame(width: 8, height: 8)
+            Text(item.label)
+                .font(.caption)
+            Text(item.message)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Color(NSColor.controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+}
+
+struct StatusItem: Identifiable, Hashable {
+    let id: String
+    let label: String
+    let ok: Bool
+    let message: String
 }
 
 struct TaskItem: Identifiable, Hashable {
@@ -137,24 +302,49 @@ struct RunItem: Identifiable, Hashable {
 final class WorkbenchModel: ObservableObject {
     @Published var projectPath = ""
     @Published var cliCommand = WorkbenchModel.defaultCLICommand()
-    @Published var adapter = "qoder"
     @Published var tasks: [TaskItem] = []
     @Published var runs: [RunItem] = []
     @Published var files: [URL] = []
     @Published var selectedTaskID: String?
     @Published var selectedRunID: String?
+    @Published var selectedInspectorTab = "Files"
     @Published var statusText = "Idle"
     @Published var statusColor = Color.gray
+    @Published var statusItems: [StatusItem] = []
+    @Published var taskText = ""
+    @Published var promptText = ""
+    @Published var promptPathDisplay = ""
     @Published var logText = ""
+    @Published var qoderOK = false
+    @Published var qoderMessage = "No project loaded"
+    @Published var lanOK = true
+    @Published var lanEnabled = false
+    @Published var lanServer = ""
+    @Published var lanProjectRoot = ""
+    @Published var lanSSHAlias = ""
+    @Published var lanMessage = "LAN disabled"
 
+    var promptURL: URL?
     private var process: Process?
+
+    init() {
+        projectPath = FileManager.default.currentDirectoryPath
+    }
 
     var isRunning: Bool {
         process != nil
     }
 
-    var canRun: Bool {
-        !isRunning && selectedTask != nil && !projectPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    var hasProject: Bool {
+        FileManager.default.fileExists(atPath: projectURL.appendingPathComponent("project.yaml").path)
+    }
+
+    var canRunFake: Bool {
+        !isRunning && selectedTask != nil && hasProject
+    }
+
+    var canRunQoder: Bool {
+        canRunFake && qoderOK
     }
 
     var selectedTask: TaskItem? {
@@ -165,9 +355,24 @@ final class WorkbenchModel: ObservableObject {
         runs.first { $0.id == selectedRunID }
     }
 
-    init() {
-        let current = FileManager.default.currentDirectoryPath
-        projectPath = current
+    func createProject() {
+        let panel = NSSavePanel()
+        panel.title = "Create Academic Harness Project"
+        panel.nameFieldStringValue = "academic-project"
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        runCLI(
+            arguments: ["init", url.path],
+            currentDirectory: url.deletingLastPathComponent(),
+            clearLog: true
+        ) { [weak self] exitCode in
+            guard let self else { return }
+            if exitCode == 0 {
+                self.projectPath = url.path
+                self.reload()
+            }
+        }
     }
 
     func chooseProject() {
@@ -185,20 +390,29 @@ final class WorkbenchModel: ObservableObject {
         refreshTasks()
         refreshRuns()
         refreshFiles()
+        loadSelectedTaskFiles()
+        refreshProjectStatus(checkLAN: false)
     }
 
-    func runSelectedTask() {
+    func runSelectedTask(adapter: String) {
         guard let task = selectedTask else { return }
         runCLI(arguments: [
             "task", "run", task.path.path,
             "--project", projectURL.path,
             "--adapter", adapter
-        ])
+        ]) { [weak self] _ in
+            self?.refreshRuns()
+            self?.refreshFiles()
+            self?.refreshProjectStatus(checkLAN: false)
+        }
     }
 
     func validateSelectedRun() {
         guard let run = selectedRun else { return }
-        runCLI(arguments: ["validate", run.runID, "--project", projectURL.path])
+        runCLI(arguments: ["validate", run.runID, "--project", projectURL.path]) { [weak self] _ in
+            self?.refreshRuns()
+            self?.refreshFiles()
+        }
     }
 
     func cancel() {
@@ -225,6 +439,58 @@ final class WorkbenchModel: ObservableObject {
         NSWorkspace.shared.activateFileViewerSelecting([run.runDir])
     }
 
+    func openProjectYAML() {
+        let url = projectURL.appendingPathComponent("project.yaml")
+        if FileManager.default.fileExists(atPath: url.path) {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    func saveTask() {
+        guard let task = selectedTask else { return }
+        do {
+            try taskText.write(to: task.path, atomically: true, encoding: .utf8)
+            appendLog("saved task: \(task.path.path)")
+            refreshTasks()
+            loadSelectedTaskFiles()
+            refreshProjectStatus(checkLAN: false)
+        } catch {
+            statusText = "Failed"
+            statusColor = .red
+            appendLog("save task failed: \(error.localizedDescription)")
+        }
+    }
+
+    func savePrompt() {
+        guard let promptURL else { return }
+        do {
+            try promptText.write(to: promptURL, atomically: true, encoding: .utf8)
+            appendLog("saved prompt: \(promptURL.path)")
+        } catch {
+            statusText = "Failed"
+            statusColor = .red
+            appendLog("save prompt failed: \(error.localizedDescription)")
+        }
+    }
+
+    func saveLANConfig() {
+        var args = [
+            "project", "set-lan",
+            "--project", projectURL.path,
+            "--enabled", lanEnabled ? "true" : "false"
+        ]
+        args.append(contentsOf: ["--server", lanServer])
+        args.append(contentsOf: ["--project-root", lanProjectRoot])
+        args.append(contentsOf: ["--ssh-alias", lanSSHAlias])
+        runCLI(arguments: args) { [weak self] _ in
+            self?.refreshProjectStatus(checkLAN: false)
+        }
+    }
+
+    func checkLAN() {
+        refreshProjectStatus(checkLAN: true)
+    }
+
     func refreshFiles() {
         guard let run = selectedRun else {
             files = []
@@ -239,6 +505,25 @@ final class WorkbenchModel: ObservableObject {
         files = found.sorted { $0.path < $1.path }
     }
 
+    func loadSelectedTaskFiles() {
+        guard let task = selectedTask else {
+            taskText = ""
+            promptText = ""
+            promptPathDisplay = ""
+            promptURL = nil
+            return
+        }
+        taskText = (try? String(contentsOf: task.path, encoding: .utf8)) ?? ""
+        promptURL = resolvePromptURL(from: taskText)
+        if let promptURL {
+            promptPathDisplay = promptURL.path
+            promptText = (try? String(contentsOf: promptURL, encoding: .utf8)) ?? ""
+        } else {
+            promptPathDisplay = ""
+            promptText = ""
+        }
+    }
+
     private var projectURL: URL {
         URL(fileURLWithPath: projectPath, isDirectory: true)
     }
@@ -250,7 +535,7 @@ final class WorkbenchModel: ObservableObject {
             .filter { ["yaml", "yml"].contains($0.pathExtension.lowercased()) }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
             .map { TaskItem(id: $0.path, name: $0.lastPathComponent, path: $0) }
-        if selectedTaskID == nil {
+        if selectedTaskID == nil || !tasks.contains(where: { $0.id == selectedTaskID }) {
             selectedTaskID = tasks.first?.id
         }
     }
@@ -261,7 +546,7 @@ final class WorkbenchModel: ObservableObject {
             .appendingPathComponent("runs", isDirectory: true)
         let runDirs = (try? FileManager.default.contentsOfDirectory(at: runsURL, includingPropertiesForKeys: nil)) ?? []
         runs = runDirs.compactMap(loadRun).sorted { $0.runID > $1.runID }
-        if selectedRunID == nil {
+        if selectedRunID == nil || !runs.contains(where: { $0.id == selectedRunID }) {
             selectedRunID = runs.first?.id
         }
     }
@@ -291,7 +576,96 @@ final class WorkbenchModel: ObservableObject {
         )
     }
 
-    private func runCLI(arguments: [String]) {
+    private func refreshProjectStatus(checkLAN: Bool) {
+        let args = [
+            "project", "status",
+            "--project", projectURL.path,
+            "--json"
+        ] + (checkLAN ? ["--check-lan"] : [])
+        runShortCLI(arguments: args) { [weak self] output, exitCode in
+            guard let self else { return }
+            if exitCode != 0 {
+                self.qoderOK = false
+                self.qoderMessage = output.isEmpty ? "status check failed" : output
+                self.statusItems = [
+                    StatusItem(id: "project", label: "Project", ok: false, message: "status failed")
+                ]
+                return
+            }
+            self.applyProjectStatus(output)
+        }
+    }
+
+    private func applyProjectStatus(_ jsonText: String) {
+        guard
+            let data = jsonText.data(using: .utf8),
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let checks = object["checks"] as? [String: Any]
+        else {
+            qoderOK = false
+            qoderMessage = "could not parse project status"
+            return
+        }
+
+        let project = checkValue("project", in: checks)
+        let tasks = checkValue("tasks", in: checks)
+        let runs = checkValue("runs", in: checks)
+        let qoder = checkValue("qoder", in: checks)
+        let lan = checkValue("lan", in: checks)
+        qoderOK = qoder.ok
+        qoderMessage = qoder.message
+        lanOK = lan.ok
+        lanMessage = lan.message
+        statusItems = [
+            StatusItem(id: "project", label: "Project", ok: project.ok, message: project.message),
+            StatusItem(id: "qoder", label: "Qoder", ok: qoder.ok, message: qoder.message),
+            StatusItem(id: "tasks", label: "Tasks", ok: tasks.ok, message: tasks.message),
+            StatusItem(id: "runs", label: "Runs", ok: runs.ok, message: runs.message),
+            StatusItem(id: "lan", label: "LAN", ok: lan.ok, message: lan.message)
+        ]
+
+        if let lanObject = checks["lan"] as? [String: Any] {
+            lanEnabled = lanObject["enabled"] as? Bool ?? false
+            lanServer = lanObject["server"] as? String ?? ""
+            lanProjectRoot = lanObject["project_root"] as? String ?? ""
+            lanSSHAlias = lanObject["ssh_alias"] as? String ?? ""
+        }
+    }
+
+    private func checkValue(_ name: String, in checks: [String: Any]) -> (ok: Bool, message: String) {
+        guard let object = checks[name] as? [String: Any] else {
+            return (false, "missing")
+        }
+        return (
+            object["ok"] as? Bool ?? false,
+            object["message"] as? String ?? ""
+        )
+    }
+
+    private func resolvePromptURL(from taskYAML: String) -> URL? {
+        for line in taskYAML.split(separator: "\n", omittingEmptySubsequences: false) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("prompt_file:") else { continue }
+            let raw = trimmed
+                .dropFirst("prompt_file:".count)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            guard !raw.isEmpty else { return nil }
+            let path = String(raw)
+            if path.hasPrefix("/") {
+                return URL(fileURLWithPath: path)
+            }
+            return projectURL.appendingPathComponent(path)
+        }
+        return nil
+    }
+
+    private func runCLI(
+        arguments: [String],
+        currentDirectory: URL? = nil,
+        clearLog: Bool = true,
+        completion: ((Int32) -> Void)? = nil
+    ) {
         guard process == nil else { return }
 
         let process = Process()
@@ -300,7 +674,7 @@ final class WorkbenchModel: ObservableObject {
         process.arguments = [cliCommand] + arguments
         process.standardOutput = output
         process.standardError = output
-        process.currentDirectoryURL = projectURL
+        process.currentDirectoryURL = currentDirectory ?? projectURL
 
         output.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
@@ -316,14 +690,16 @@ final class WorkbenchModel: ObservableObject {
                 self.statusText = completed.terminationStatus == 0 ? "Finished" : "Failed"
                 self.statusColor = completed.terminationStatus == 0 ? .green : .red
                 self.appendLog("exit=\(completed.terminationStatus)")
-                self.reload()
+                completion?(completed.terminationStatus)
             }
         }
 
         do {
             statusText = "Running"
             statusColor = .yellow
-            logText = ""
+            if clearLog {
+                logText = ""
+            }
             try process.run()
             self.process = process
             appendLog(([cliCommand] + arguments).joined(separator: " "))
@@ -332,6 +708,34 @@ final class WorkbenchModel: ObservableObject {
             statusText = "Failed"
             statusColor = .red
             appendLog(error.localizedDescription)
+            completion?(-1)
+        }
+    }
+
+    private func runShortCLI(arguments: [String], completion: @escaping (String, Int32) -> Void) {
+        let command = cliCommand
+        let currentDirectory = projectURL
+        Task.detached {
+            let process = Process()
+            let output = Pipe()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = [command] + arguments
+            process.standardOutput = output
+            process.standardError = output
+            process.currentDirectoryURL = currentDirectory
+            do {
+                try process.run()
+                process.waitUntilExit()
+                let data = output.fileHandleForReading.readDataToEndOfFile()
+                let text = String(data: data, encoding: .utf8) ?? ""
+                await MainActor.run {
+                    completion(text.trimmingCharacters(in: .whitespacesAndNewlines), process.terminationStatus)
+                }
+            } catch {
+                await MainActor.run {
+                    completion(error.localizedDescription, -1)
+                }
+            }
         }
     }
 
@@ -341,8 +745,8 @@ final class WorkbenchModel: ObservableObject {
             logText += "\n"
         }
         logText += message
-        if logText.count > 12000 {
-            logText = String(logText.suffix(12000))
+        if logText.count > 16000 {
+            logText = String(logText.suffix(16000))
         }
     }
 
