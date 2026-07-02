@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
 
 from .index import init_index
 from .paths import PROJECT_FILE, WORKBENCH_DIR, find_project_root, workbench_dir
+from .qoder_dependency import discover_qoder_runner
 from .yamlio import dump_yaml, load_yaml
 
 
@@ -95,6 +95,25 @@ def set_lan_config(
     return project_status(root, check_lan=False)
 
 
+def set_qoder_config(
+    project_dir: Path,
+    runner_command: str | None,
+    config: str | None,
+    profile: str | None,
+) -> dict[str, Any]:
+    root, project = load_project(project_dir)
+    qoder = dict(project.get("qoder") or {})
+    if runner_command is not None:
+        qoder["runner_command"] = runner_command
+    if config is not None:
+        qoder["config"] = config
+    if profile is not None:
+        qoder["profile"] = profile
+    project["qoder"] = qoder
+    (root / PROJECT_FILE).write_text(dump_yaml(project), encoding="utf-8")
+    return project_status(root, check_lan=False)
+
+
 def load_project(path: Path) -> tuple[Path, dict[str, Any]]:
     root = find_project_root(path)
     return root, load_yaml(root / PROJECT_FILE)
@@ -109,52 +128,7 @@ def ensure_project_dirs(project_root: Path) -> None:
 
 
 def _qoder_status(project_dir: Path, project: dict[str, Any]) -> dict[str, Any]:
-    qoder = project.get("qoder") or {}
-    runner_command = str(qoder.get("runner_command") or "").strip()
-    config_value = str(qoder.get("config") or "").strip()
-    messages: list[str] = []
-
-    if not runner_command:
-        return {"ok": False, "message": "qoder.runner_command missing"}
-
-    runner_path = _resolve_command(runner_command)
-    runner_ok = runner_path is not None
-    if runner_ok:
-        messages.append(f"runner found: {runner_path}")
-    else:
-        messages.append(f"runner not found: {runner_command}")
-
-    config_ok = True
-    config_path = None
-    if config_value:
-        config_path = _resolve_project_path(project_dir, config_value)
-        config_ok = config_path.exists()
-        messages.append("config found" if config_ok else f"config missing: {config_path}")
-
-    help_ok = False
-    if runner_ok:
-        try:
-            completed = subprocess.run(
-                [runner_path, "--help"],
-                cwd=project_dir,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=5,
-            )
-            help_ok = completed.returncode == 0
-            messages.append("runner --help ok" if help_ok else "runner --help failed")
-        except Exception as error:
-            messages.append(f"runner --help error: {error}")
-
-    return {
-        "ok": runner_ok and config_ok and help_ok,
-        "runner_command": runner_command,
-        "runner_path": runner_path,
-        "config_path": str(config_path) if config_path else None,
-        "profile": qoder.get("profile") or "default",
-        "message": "; ".join(messages),
-    }
+    return discover_qoder_runner(project_dir, project, check_help=True)
 
 
 def _lan_status(project: dict[str, Any], check_lan: bool) -> dict[str, Any]:
@@ -202,21 +176,6 @@ def _lan_status(project: dict[str, Any], check_lan: bool) -> dict[str, Any]:
     return result
 
 
-def _resolve_project_path(project_dir: Path, value: str) -> Path:
-    path = Path(value)
-    return path if path.is_absolute() else project_dir / path
-
-
-def _resolve_command(command: str) -> str | None:
-    command = command.strip()
-    if not command:
-        return None
-    path = Path(command)
-    if path.is_absolute() or "/" in command:
-        return str(path) if path.exists() else None
-    return shutil.which(command)
-
-
 def _write_if_missing(path: Path, content: str, force: bool) -> None:
     if path.exists() and not force:
         return
@@ -238,7 +197,6 @@ def _default_project(name: str) -> dict[str, Any]:
         },
         "qoder": {
             "runner_command": "qoder-run",
-            "config": "../qoder-agent-runner/config.local.json",
             "profile": "default",
         },
     }

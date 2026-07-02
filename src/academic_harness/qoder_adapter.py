@@ -6,6 +6,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from .qoder_dependency import discover_qoder_runner
+
 
 class AdapterError(RuntimeError):
     pass
@@ -61,14 +63,17 @@ def _run_live_qoder(
     run_id: str,
     qoder_dir: Path,
 ) -> dict[str, Any]:
-    qoder = project.get("qoder") or {}
-    runner_command = qoder.get("runner_command") or "qoder-run"
+    qoder = discover_qoder_runner(project_root, project, check_help=False)
+    runner_command = qoder.get("runner_path")
+    if not runner_command:
+        raise AdapterError(f"qoder-run not found. {qoder.get('install_hint')}")
+    if not qoder.get("config_path"):
+        raise AdapterError("Qoder config missing. Save a project Qoder config or run academic-harness qoder install.")
     profile = qoder.get("profile") or "default"
-    config = qoder.get("config")
     prompt_file = _resolve_project_path(project_root, task["input"]["prompt_file"])
 
     command = [
-        runner_command,
+        str(runner_command),
         "--prompt-file",
         str(prompt_file),
         "--profile",
@@ -84,8 +89,7 @@ def _run_live_qoder(
         "--metadata",
         f"run_id={run_id}",
     ]
-    if config:
-        command.extend(["--config", str(_resolve_project_path(project_root, str(config)))])
+    command.extend(["--config", str(qoder["config_path"])])
 
     completed = subprocess.run(
         command,
@@ -101,6 +105,7 @@ def _run_live_qoder(
         "adapter": "qoder",
         "qoder_dir": str(qoder_dir),
         "command": command,
+        "runner_source": qoder.get("source"),
         "stdout": completed.stdout,
         "stderr": completed.stderr,
     }

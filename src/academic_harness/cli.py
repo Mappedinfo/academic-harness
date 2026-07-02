@@ -6,8 +6,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .project import init_project, project_status, set_lan_config
+from .project import init_project, project_status, set_lan_config, set_qoder_config
+from .qoder_dependency import DEFAULT_QODER_REPO_URL, discover_qoder_runner, install_qoder_runner
+from .paths import PROJECT_FILE
 from .runs import list_project_runs, rerun_validators, run_task, show_run
+from .yamlio import load_yaml
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -44,6 +47,31 @@ def build_parser() -> argparse.ArgumentParser:
     project_lan.add_argument("--ssh-alias")
     project_lan.add_argument("--enabled", choices=["true", "false"])
     project_lan.set_defaults(func=_cmd_project_set_lan)
+
+    project_qoder = project_subparsers.add_parser("set-qoder", help="write Qoder runner config")
+    project_qoder.add_argument("--project", required=True, type=Path)
+    project_qoder.add_argument("--runner-command")
+    project_qoder.add_argument("--config")
+    project_qoder.add_argument("--profile")
+    project_qoder.set_defaults(func=_cmd_project_set_qoder)
+
+    qoder_parser = subparsers.add_parser("qoder", help="Qoder runner dependency commands")
+    qoder_subparsers = qoder_parser.add_subparsers(dest="qoder_command", required=True)
+    qoder_discover = qoder_subparsers.add_parser("discover", help="discover registered qoder-run")
+    qoder_discover.add_argument("--project", type=Path)
+    qoder_discover.add_argument("--json", action="store_true")
+    qoder_discover.set_defaults(func=_cmd_qoder_discover)
+
+    qoder_install = qoder_subparsers.add_parser("install", help="install and register qoder-agent-runner")
+    qoder_install.add_argument("--project", type=Path)
+    qoder_install.add_argument("--repo", default=DEFAULT_QODER_REPO_URL)
+    qoder_install.add_argument("--install-root", type=Path)
+    qoder_install.add_argument("--local-repo", type=Path)
+    qoder_install.add_argument("--bin-dir", type=Path)
+    qoder_install.add_argument("--config", type=Path)
+    qoder_install.add_argument("--profile", default="default")
+    qoder_install.add_argument("--no-project-update", action="store_true")
+    qoder_install.set_defaults(func=_cmd_qoder_install)
 
     task_parser = subparsers.add_parser("task", help="task commands")
     task_subparsers = task_parser.add_subparsers(dest="task_command", required=True)
@@ -109,6 +137,49 @@ def _cmd_project_set_lan(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_project_set_qoder(args: argparse.Namespace) -> int:
+    status = set_qoder_config(
+        args.project,
+        runner_command=args.runner_command,
+        config=args.config,
+        profile=args.profile,
+    )
+    print(json.dumps(status, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0
+
+
+def _cmd_qoder_discover(args: argparse.Namespace) -> int:
+    project_root, project = _load_project_if_present(args.project)
+    discovery = discover_qoder_runner(project_root, project, check_help=True)
+    if args.json:
+        print(json.dumps(discovery, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        print(f"ok={str(discovery['ok']).lower()}")
+        print(f"source={discovery.get('source')}")
+        print(f"runner={discovery.get('runner_path') or ''}")
+        print(f"config={discovery.get('config_path') or ''}")
+        print(f"profile={discovery.get('profile') or ''}")
+        print(f"message={discovery.get('message') or ''}")
+    return 0 if discovery.get("runner_path") else 1
+
+
+def _cmd_qoder_install(args: argparse.Namespace) -> int:
+    project_root, project = _load_project_if_present(args.project)
+    result = install_qoder_runner(
+        project_root=project_root,
+        project=project,
+        repo_url=args.repo,
+        install_root=args.install_root,
+        local_repo=args.local_repo,
+        bin_dir=args.bin_dir,
+        config=args.config,
+        profile=args.profile,
+        update_project=not args.no_project_update,
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0
+
+
 def _cmd_task_run(args: argparse.Namespace) -> int:
     manifest = run_task(args.task_yaml, adapter=args.adapter, run_id=args.run_id, project_root=args.project)
     _print_run_summary(manifest)
@@ -159,6 +230,16 @@ def _print_run_summary(manifest: dict[str, Any]) -> None:
     if manifest.get("summary_path"):
         print(f"summary={manifest['summary_path']}")
     print(f"manifest={manifest['manifest_path']}")
+
+
+def _load_project_if_present(project_path: Path | None) -> tuple[Path | None, dict[str, Any] | None]:
+    if project_path is None:
+        return None, None
+    project_root = project_path.resolve()
+    project_file = project_root / PROJECT_FILE
+    if not project_file.exists():
+        return project_root, None
+    return project_root, load_yaml(project_file)
 
 
 if __name__ == "__main__":

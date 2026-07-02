@@ -35,11 +35,11 @@ struct ContentView: View {
             Text(model.statusText)
                 .font(.headline)
                 .frame(width: 92, alignment: .leading)
-            TextField("Project path", text: $model.projectPath)
+            TextField("项目路径", text: $model.projectPath)
                 .textFieldStyle(.roundedBorder)
-            Button("Create Project") { model.createProject() }
-            Button("Choose") { model.chooseProject() }
-            Button("Reload") { model.reload() }
+            Button("创建项目") { model.createProject() }
+            Button("选择") { model.chooseProject() }
+            Button("刷新") { model.reload() }
         }
     }
 
@@ -64,9 +64,9 @@ struct ContentView: View {
                 .disabled(!model.canRunFake)
             Button("Run Qoder") { model.runSelectedTask(adapter: "qoder") }
                 .disabled(!model.canRunQoder)
-            Button("Cancel") { model.cancel() }
+            Button("取消") { model.cancel() }
                 .disabled(!model.isRunning)
-            Button("Validate") { model.validateSelectedRun() }
+            Button("验证") { model.validateSelectedRun() }
                 .disabled(model.selectedRun == nil || model.isRunning)
         }
     }
@@ -81,7 +81,7 @@ struct ContentView: View {
 
     private var taskList: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Tasks")
+            Text("任务")
                 .font(.headline)
             List(selection: $model.selectedTaskID) {
                 ForEach(model.tasks) { task in
@@ -95,17 +95,17 @@ struct ContentView: View {
 
     private var runList: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Runs")
+            Text("运行历史")
                 .font(.headline)
             Table(model.runs, selection: $model.selectedRunID) {
                 TableColumn("Run") { run in
                     Text(run.runID)
                         .font(.system(.caption, design: .monospaced))
                 }
-                TableColumn("Status") { run in
+                TableColumn("状态") { run in
                     Text(run.status)
                 }
-                TableColumn("Task") { run in
+                TableColumn("任务") { run in
                     Text(run.taskID)
                 }
             }
@@ -115,12 +115,12 @@ struct ContentView: View {
 
     private var inspector: some View {
         VStack(spacing: 8) {
-            Picker("Inspector", selection: $model.selectedInspectorTab) {
-                Text("Files").tag("Files")
-                Text("Task").tag("Task")
+            Picker("检查器", selection: $model.selectedInspectorTab) {
+                Text("文件").tag("Files")
+                Text("任务").tag("Task")
                 Text("Prompt").tag("Prompt")
-                Text("Settings").tag("Settings")
-                Text("Log").tag("Log")
+                Text("设置").tag("Settings")
+                Text("日志").tag("Log")
             }
             .pickerStyle(.segmented)
 
@@ -143,14 +143,14 @@ struct ContentView: View {
     private var filesView: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Files")
+                Text("文件")
                     .font(.headline)
                 Spacer()
-                Button("Open Report") { model.openReport() }
+                Button("打开报告") { model.openReport() }
                     .disabled(model.selectedRun?.reportPath == nil)
-                Button("Open Summary") { model.openSummary() }
+                Button("打开总结") { model.openSummary() }
                     .disabled(model.selectedRun?.summaryPath == nil)
-                Button("Reveal") { model.revealRun() }
+                Button("显示文件夹") { model.revealRun() }
                     .disabled(model.selectedRun == nil)
             }
             List(model.files, id: \.path) { file in
@@ -165,10 +165,10 @@ struct ContentView: View {
     private var taskEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(model.selectedTask?.name ?? "No Task")
+                Text(model.selectedTask?.name ?? "未选择任务")
                     .font(.headline)
                 Spacer()
-                Button("Save Task") { model.saveTask() }
+                Button("保存任务") { model.saveTask() }
                     .disabled(model.selectedTask == nil)
             }
             TextEditor(text: $model.taskText)
@@ -180,11 +180,11 @@ struct ContentView: View {
     private var promptEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(model.promptPathDisplay.isEmpty ? "No Prompt" : model.promptPathDisplay)
+                Text(model.promptPathDisplay.isEmpty ? "未找到 Prompt" : model.promptPathDisplay)
                     .font(.headline)
                     .lineLimit(1)
                 Spacer()
-                Button("Save Prompt") { model.savePrompt() }
+                Button("保存 Prompt") { model.savePrompt() }
                     .disabled(model.promptURL == nil)
             }
             TextEditor(text: $model.promptText)
@@ -195,12 +195,24 @@ struct ContentView: View {
 
     private var settingsView: some View {
         VStack(alignment: .leading, spacing: 12) {
-            GroupBox("Qoder") {
-                VStack(alignment: .leading, spacing: 6) {
+            GroupBox("Qoder Cloud Agent") {
+                VStack(alignment: .leading, spacing: 8) {
+                    labeledField("Runner", text: $model.qoderRunnerCommand)
+                    labeledField("Config", text: $model.qoderConfigPath)
+                    labeledField("Profile", text: $model.qoderProfile)
+                    HStack {
+                        Button("自动发现") { model.discoverQoderRunner() }
+                            .disabled(!model.hasProject)
+                        Button("安装/注册") { model.installQoderRunner() }
+                            .disabled(!model.hasProject || model.isRunning)
+                        Button("保存 Qoder 配置") { model.saveQoderConfig() }
+                            .disabled(!model.hasProject)
+                        Spacer()
+                    }
                     Text(model.qoderMessage)
                         .font(.caption)
                         .foregroundStyle(model.qoderOK ? .green : .red)
-                    Button("Open Project YAML") { model.openProjectYAML() }
+                    Button("打开 project.yaml") { model.openProjectYAML() }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 4)
@@ -208,14 +220,14 @@ struct ContentView: View {
 
             GroupBox("LAN Worker") {
                 VStack(alignment: .leading, spacing: 8) {
-                    Toggle("Enabled", isOn: $model.lanEnabled)
+                    Toggle("启用", isOn: $model.lanEnabled)
                     labeledField("Server", text: $model.lanServer)
                     labeledField("Project Root", text: $model.lanProjectRoot)
                     labeledField("SSH Alias", text: $model.lanSSHAlias)
                     HStack {
-                        Button("Save LAN Config") { model.saveLANConfig() }
+                        Button("保存 LAN 配置") { model.saveLANConfig() }
                             .disabled(!model.hasProject)
-                        Button("Check LAN") { model.checkLAN() }
+                        Button("检查 LAN") { model.checkLAN() }
                             .disabled(!model.hasProject)
                         Spacer()
                     }
@@ -316,13 +328,16 @@ final class WorkbenchModel: ObservableObject {
     @Published var promptPathDisplay = ""
     @Published var logText = ""
     @Published var qoderOK = false
-    @Published var qoderMessage = "No project loaded"
+    @Published var qoderMessage = "未加载项目"
+    @Published var qoderRunnerCommand = "qoder-run"
+    @Published var qoderConfigPath = ""
+    @Published var qoderProfile = "default"
     @Published var lanOK = true
     @Published var lanEnabled = false
     @Published var lanServer = ""
     @Published var lanProjectRoot = ""
     @Published var lanSSHAlias = ""
-    @Published var lanMessage = "LAN disabled"
+    @Published var lanMessage = "LAN 未启用"
 
     var promptURL: URL?
     private var process: Process?
@@ -443,6 +458,47 @@ final class WorkbenchModel: ObservableObject {
         let url = projectURL.appendingPathComponent("project.yaml")
         if FileManager.default.fileExists(atPath: url.path) {
             NSWorkspace.shared.open(url)
+        }
+    }
+
+    func discoverQoderRunner() {
+        runShortCLI(arguments: ["qoder", "discover", "--project", projectURL.path, "--json"]) { [weak self] output, exitCode in
+            guard let self else { return }
+            if exitCode != 0 {
+                self.qoderOK = false
+                self.qoderMessage = output.isEmpty ? "未发现 qoder-run" : output
+                return
+            }
+            self.applyQoderDiscovery(output)
+            self.refreshProjectStatus(checkLAN: false)
+        }
+    }
+
+    func installQoderRunner() {
+        runCLI(arguments: ["qoder", "install", "--project", projectURL.path]) { [weak self] _ in
+            self?.refreshProjectStatus(checkLAN: false)
+        }
+    }
+
+    func saveQoderConfig() {
+        var args = [
+            "project", "set-qoder",
+            "--project", projectURL.path
+        ]
+        let runner = qoderRunnerCommand.trimmingCharacters(in: .whitespacesAndNewlines)
+        let config = qoderConfigPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let profile = qoderProfile.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !runner.isEmpty {
+            args.append(contentsOf: ["--runner-command", runner])
+        }
+        if !config.isEmpty {
+            args.append(contentsOf: ["--config", config])
+        }
+        if !profile.isEmpty {
+            args.append(contentsOf: ["--profile", profile])
+        }
+        runCLI(arguments: args) { [weak self] _ in
+            self?.refreshProjectStatus(checkLAN: false)
         }
     }
 
@@ -586,9 +642,9 @@ final class WorkbenchModel: ObservableObject {
             guard let self else { return }
             if exitCode != 0 {
                 self.qoderOK = false
-                self.qoderMessage = output.isEmpty ? "status check failed" : output
+                self.qoderMessage = output.isEmpty ? "状态检查失败" : output
                 self.statusItems = [
-                    StatusItem(id: "project", label: "Project", ok: false, message: "status failed")
+                    StatusItem(id: "project", label: "项目", ok: false, message: "状态失败")
                 ]
                 return
             }
@@ -603,7 +659,7 @@ final class WorkbenchModel: ObservableObject {
             let checks = object["checks"] as? [String: Any]
         else {
             qoderOK = false
-            qoderMessage = "could not parse project status"
+            qoderMessage = "无法解析项目状态"
             return
         }
 
@@ -617,12 +673,22 @@ final class WorkbenchModel: ObservableObject {
         lanOK = lan.ok
         lanMessage = lan.message
         statusItems = [
-            StatusItem(id: "project", label: "Project", ok: project.ok, message: project.message),
+            StatusItem(id: "project", label: "项目", ok: project.ok, message: project.message),
             StatusItem(id: "qoder", label: "Qoder", ok: qoder.ok, message: qoder.message),
-            StatusItem(id: "tasks", label: "Tasks", ok: tasks.ok, message: tasks.message),
+            StatusItem(id: "tasks", label: "任务", ok: tasks.ok, message: tasks.message),
             StatusItem(id: "runs", label: "Runs", ok: runs.ok, message: runs.message),
             StatusItem(id: "lan", label: "LAN", ok: lan.ok, message: lan.message)
         ]
+
+        if let qoderObject = checks["qoder"] as? [String: Any] {
+            qoderRunnerCommand = qoderObject["runner_command"] as? String ?? qoderRunnerCommand
+            if let config = qoderObject["config"] as? String, !config.isEmpty {
+                qoderConfigPath = config
+            } else if let configPath = qoderObject["config_path"] as? String, !configPath.isEmpty {
+                qoderConfigPath = configPath
+            }
+            qoderProfile = qoderObject["profile"] as? String ?? qoderProfile
+        }
 
         if let lanObject = checks["lan"] as? [String: Any] {
             lanEnabled = lanObject["enabled"] as? Bool ?? false
@@ -630,6 +696,26 @@ final class WorkbenchModel: ObservableObject {
             lanProjectRoot = lanObject["project_root"] as? String ?? ""
             lanSSHAlias = lanObject["ssh_alias"] as? String ?? ""
         }
+    }
+
+    private func applyQoderDiscovery(_ jsonText: String) {
+        guard
+            let data = jsonText.data(using: .utf8),
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            qoderOK = false
+            qoderMessage = "无法解析 Qoder 发现结果"
+            return
+        }
+        qoderOK = object["ok"] as? Bool ?? false
+        qoderMessage = object["message"] as? String ?? ""
+        if let runner = object["runner_path"] as? String, !runner.isEmpty {
+            qoderRunnerCommand = runner
+        }
+        if let config = object["config_path"] as? String, !config.isEmpty {
+            qoderConfigPath = config
+        }
+        qoderProfile = object["profile"] as? String ?? qoderProfile
     }
 
     private func checkValue(_ name: String, in checks: [String: Any]) -> (ok: Bool, message: String) {
