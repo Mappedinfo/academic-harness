@@ -67,8 +67,12 @@ def discover_qoder_runner(
             help_ok, help_message = _check_runner_help(runner_path, project_root)
 
         config_ok = config_path is not None and config_path.exists()
+        config_check_ok = True
+        config_check_message = None
+        if check_help and config_ok:
+            config_check_ok, config_check_message = _check_runner_config(runner_path, config_path, profile, project_root)
         result = {
-            "ok": bool(help_ok and config_ok),
+            "ok": bool(help_ok and config_ok and config_check_ok),
             "source": candidate["source"],
             "runner_command": str(candidate.get("runner_command") or ""),
             "runner_path": str(runner_path),
@@ -83,6 +87,8 @@ def discover_qoder_runner(
         status_parts.append("config found" if config_ok else "config missing")
         if help_message:
             status_parts.append(help_message)
+        if config_check_message:
+            status_parts.append(config_check_message)
         result["message"] = "; ".join(status_parts)
         if result["ok"]:
             return result
@@ -337,6 +343,32 @@ def _check_runner_help(runner_path: Path, cwd: Path | None) -> tuple[bool, str]:
     if completed.returncode == 0:
         return True, "runner --help ok"
     return False, "runner --help failed"
+
+
+def _check_runner_config(runner_path: Path, config_path: Path, profile: str, cwd: Path | None) -> tuple[bool, str]:
+    try:
+        completed = subprocess.run(
+            [
+                str(runner_path),
+                "--check-config",
+                "--config",
+                str(config_path),
+                "--profile",
+                profile,
+            ],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=8,
+        )
+    except Exception as error:
+        return False, f"runner config check error: {error}"
+    if completed.returncode == 0:
+        return True, "runner config ok"
+    detail = (completed.stderr.strip() or completed.stdout.strip()).splitlines()
+    message = detail[0] if detail else "runner config check failed"
+    return False, message
 
 
 def _run(command: list[str], cwd: Path) -> None:
