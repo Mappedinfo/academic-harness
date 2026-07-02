@@ -114,6 +114,13 @@ def set_qoder_config(
     return project_status(root, check_lan=False)
 
 
+def reset_qoder_config(project_dir: Path) -> dict[str, Any]:
+    root, project = load_project(project_dir)
+    project["qoder"] = {"profile": "default"}
+    (root / PROJECT_FILE).write_text(dump_yaml(project), encoding="utf-8")
+    return project_status(root, check_lan=False)
+
+
 def load_project(path: Path) -> tuple[Path, dict[str, Any]]:
     root = find_project_root(path)
     return root, load_yaml(root / PROJECT_FILE)
@@ -195,10 +202,7 @@ def _default_project(name: str) -> dict[str, Any]:
             "figures_dir": "figures",
             "tables_dir": "tables",
         },
-        "qoder": {
-            "runner_command": "qoder-run",
-            "profile": "default",
-        },
+        "qoder": {"profile": "default"},
     }
 
 

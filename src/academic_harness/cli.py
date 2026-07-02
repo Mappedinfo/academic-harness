@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .project import init_project, project_status, set_lan_config, set_qoder_config
+from .project import init_project, project_status, reset_qoder_config, set_lan_config, set_qoder_config
 from .qoder_dependency import DEFAULT_QODER_REPO_URL, discover_qoder_runner, install_qoder_runner
 from .paths import PROJECT_FILE
 from .runs import list_project_runs, rerun_validators, run_task, show_run
@@ -55,6 +55,10 @@ def build_parser() -> argparse.ArgumentParser:
     project_qoder.add_argument("--profile")
     project_qoder.set_defaults(func=_cmd_project_set_qoder)
 
+    project_reset_qoder = project_subparsers.add_parser("reset-qoder", help="use system Qoder runner registry")
+    project_reset_qoder.add_argument("--project", required=True, type=Path)
+    project_reset_qoder.set_defaults(func=_cmd_project_reset_qoder)
+
     qoder_parser = subparsers.add_parser("qoder", help="Qoder runner dependency commands")
     qoder_subparsers = qoder_parser.add_subparsers(dest="qoder_command", required=True)
     qoder_discover = qoder_subparsers.add_parser("discover", help="discover registered qoder-run")
@@ -70,7 +74,8 @@ def build_parser() -> argparse.ArgumentParser:
     qoder_install.add_argument("--bin-dir", type=Path)
     qoder_install.add_argument("--config", type=Path)
     qoder_install.add_argument("--profile", default="default")
-    qoder_install.add_argument("--no-project-update", action="store_true")
+    qoder_install.add_argument("--write-project", action="store_true", help="write discovered paths into project.yaml")
+    qoder_install.add_argument("--no-project-update", action="store_true", help=argparse.SUPPRESS)
     qoder_install.set_defaults(func=_cmd_qoder_install)
 
     task_parser = subparsers.add_parser("task", help="task commands")
@@ -148,6 +153,12 @@ def _cmd_project_set_qoder(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_project_reset_qoder(args: argparse.Namespace) -> int:
+    status = reset_qoder_config(args.project)
+    print(json.dumps(status, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0
+
+
 def _cmd_qoder_discover(args: argparse.Namespace) -> int:
     project_root, project = _load_project_if_present(args.project)
     discovery = discover_qoder_runner(project_root, project, check_help=True)
@@ -174,7 +185,7 @@ def _cmd_qoder_install(args: argparse.Namespace) -> int:
         bin_dir=args.bin_dir,
         config=args.config,
         profile=args.profile,
-        update_project=not args.no_project_update,
+        update_project=args.write_project and not args.no_project_update,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
     return 0

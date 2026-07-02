@@ -116,7 +116,7 @@ def install_qoder_runner(
     bin_dir: Path | None = None,
     config: Path | None = None,
     profile: str = "default",
-    update_project: bool = True,
+    update_project: bool = False,
 ) -> dict[str, Any]:
     project_root = project_root.resolve() if project_root else None
     repo_path = _select_repo(project_root, local_repo, install_root or default_install_root(), repo_url)

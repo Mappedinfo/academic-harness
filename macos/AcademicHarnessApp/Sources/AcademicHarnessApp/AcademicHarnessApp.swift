@@ -54,15 +54,12 @@ struct ContentView: View {
 
     private var controls: some View {
         HStack(spacing: 8) {
-            Text("CLI")
+            Text(model.selectedTask?.name ?? "未选择任务")
                 .foregroundStyle(.secondary)
-            TextField("academic-harness", text: $model.cliCommand)
-                .textFieldStyle(.roundedBorder)
-                .frame(minWidth: 240)
             Spacer()
-            Button("Run Fake") { model.runSelectedTask(adapter: "fake") }
+            Button("本地测试") { model.runSelectedTask(adapter: "fake") }
                 .disabled(!model.canRunFake)
-            Button("Run Qoder") { model.runSelectedTask(adapter: "qoder") }
+            Button("运行 Qoder") { model.runSelectedTask(adapter: "qoder") }
                 .disabled(!model.canRunQoder)
             Button("取消") { model.cancel() }
                 .disabled(!model.isRunning)
@@ -115,7 +112,7 @@ struct ContentView: View {
 
     private var inspector: some View {
         VStack(spacing: 8) {
-            Picker("检查器", selection: $model.selectedInspectorTab) {
+            Picker("", selection: $model.selectedInspectorTab) {
                 Text("文件").tag("Files")
                 Text("任务").tag("Task")
                 Text("Prompt").tag("Prompt")
@@ -123,6 +120,7 @@ struct ContentView: View {
                 Text("日志").tag("Log")
             }
             .pickerStyle(.segmented)
+            .labelsHidden()
 
             switch model.selectedInspectorTab {
             case "Task":
@@ -195,28 +193,7 @@ struct ContentView: View {
 
     private var settingsView: some View {
         VStack(alignment: .leading, spacing: 12) {
-            GroupBox("Qoder Cloud Agent") {
-                VStack(alignment: .leading, spacing: 8) {
-                    labeledField("Runner", text: $model.qoderRunnerCommand)
-                    labeledField("Config", text: $model.qoderConfigPath)
-                    labeledField("Profile", text: $model.qoderProfile)
-                    HStack {
-                        Button("自动发现") { model.discoverQoderRunner() }
-                            .disabled(!model.hasProject)
-                        Button("安装/注册") { model.installQoderRunner() }
-                            .disabled(!model.hasProject || model.isRunning)
-                        Button("保存 Qoder 配置") { model.saveQoderConfig() }
-                            .disabled(!model.hasProject)
-                        Spacer()
-                    }
-                    Text(model.qoderMessage)
-                        .font(.caption)
-                        .foregroundStyle(model.qoderOK ? .green : .red)
-                    Button("打开 project.yaml") { model.openProjectYAML() }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 4)
-            }
+            qoderSettingsCard
 
             GroupBox("LAN Worker") {
                 VStack(alignment: .leading, spacing: 8) {
@@ -237,9 +214,75 @@ struct ContentView: View {
                 }
                 .padding(.vertical, 4)
             }
+            DisclosureGroup("应用高级设置", isExpanded: $model.showAdvancedAppSettings) {
+                VStack(alignment: .leading, spacing: 8) {
+                    labeledField("CLI", text: $model.cliCommand)
+                    Text("打包版通常不需要改这里。只有在调试源码版 CLI 时才需要覆盖。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            }
             Spacer()
         }
         .padding(.top, 4)
+    }
+
+    private var qoderSettingsCard: some View {
+        GroupBox("Qoder 云端 Agent") {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .center, spacing: 8) {
+                    Circle()
+                        .fill(model.qoderOK ? Color.green : Color.red)
+                        .frame(width: 10, height: 10)
+                    Text(model.qoderStatusTitle)
+                        .font(.headline)
+                    Spacer()
+                }
+                Text(model.qoderStatusDetail)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack {
+                    Button(model.qoderOK ? "重新检查" : "一键配置 Qoder") {
+                        if model.qoderOK {
+                            model.discoverQoderRunner()
+                        } else {
+                            model.setupQoderRunner()
+                        }
+                    }
+                    .disabled(!model.hasProject || model.isRunning)
+                    Button("使用系统配置") { model.resetQoderToSystem() }
+                        .disabled(!model.hasProject || model.isRunning)
+                    Button("运行当前任务") { model.runSelectedTask(adapter: "qoder") }
+                        .disabled(!model.canRunQoder)
+                    Spacer()
+                }
+
+                DisclosureGroup("高级配置", isExpanded: $model.showAdvancedQoderSettings) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        labeledField("Runner", text: $model.qoderRunnerCommand)
+                        labeledField("Config", text: $model.qoderConfigPath)
+                        labeledField("Profile", text: $model.qoderProfile)
+                        HStack {
+                            Button("保存项目覆盖") { model.saveQoderConfig() }
+                                .disabled(!model.hasProject)
+                            Button("打开 project.yaml") { model.openProjectYAML() }
+                                .disabled(!model.hasProject)
+                            Spacer()
+                        }
+                        Text(model.qoderTechnicalSummary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 4)
+        }
     }
 
     private var logView: some View {
@@ -332,6 +375,12 @@ final class WorkbenchModel: ObservableObject {
     @Published var qoderRunnerCommand = "qoder-run"
     @Published var qoderConfigPath = ""
     @Published var qoderProfile = "default"
+    @Published var qoderRunnerPath = ""
+    @Published var qoderResolvedConfigPath = ""
+    @Published var qoderSource = ""
+    @Published var qoderRegistryPath = ""
+    @Published var showAdvancedQoderSettings = false
+    @Published var showAdvancedAppSettings = false
     @Published var lanOK = true
     @Published var lanEnabled = false
     @Published var lanServer = ""
@@ -368,6 +417,36 @@ final class WorkbenchModel: ObservableObject {
 
     var selectedRun: RunItem? {
         runs.first { $0.id == selectedRunID }
+    }
+
+    var qoderStatusTitle: String {
+        if !hasProject {
+            return "请先创建或选择项目"
+        }
+        return qoderOK ? "Qoder 已就绪" : "Qoder 尚未配置好"
+    }
+
+    var qoderStatusDetail: String {
+        if !hasProject {
+            return "创建或选择项目后，应用会自动检查本机 Qoder Runner。"
+        }
+        if qoderOK {
+            let runner = shortName(qoderRunnerPath.isEmpty ? qoderRunnerCommand : qoderRunnerPath)
+            let config = shortName(qoderResolvedConfigPath.isEmpty ? qoderConfigPath : qoderResolvedConfigPath)
+            let nextStep = selectedTask == nil ? "请先在左侧选择一个任务。" : "可以直接运行当前任务。"
+            return "已连接本机 \(runner)，使用 \(config)，Profile: \(qoderProfile)。\(nextStep)"
+        }
+        return "点击“一键配置 Qoder”会安装/注册 qoder-run，并让项目回到系统自动发现模式。"
+    }
+
+    var qoderTechnicalSummary: String {
+        [
+            "来源: \(qoderSource.isEmpty ? "未发现" : qoderSource)",
+            "Runner: \(qoderRunnerPath.isEmpty ? qoderRunnerCommand : qoderRunnerPath)",
+            "Config: \(qoderResolvedConfigPath.isEmpty ? qoderConfigPath : qoderResolvedConfigPath)",
+            "Registry: \(qoderRegistryPath.isEmpty ? "默认位置" : qoderRegistryPath)",
+            "状态: \(qoderMessage)"
+        ].joined(separator: "\n")
     }
 
     func createProject() {
@@ -476,6 +555,26 @@ final class WorkbenchModel: ObservableObject {
 
     func installQoderRunner() {
         runCLI(arguments: ["qoder", "install", "--project", projectURL.path]) { [weak self] _ in
+            self?.refreshProjectStatus(checkLAN: false)
+        }
+    }
+
+    func setupQoderRunner() {
+        runCLI(arguments: ["qoder", "install", "--project", projectURL.path]) { [weak self] exitCode in
+            guard let self else { return }
+            if exitCode == 0 {
+                self.resetQoderToSystem(clearLog: false)
+            } else {
+                self.refreshProjectStatus(checkLAN: false)
+            }
+        }
+    }
+
+    func resetQoderToSystem(clearLog: Bool = true) {
+        runCLI(
+            arguments: ["project", "reset-qoder", "--project", projectURL.path],
+            clearLog: clearLog
+        ) { [weak self] _ in
             self?.refreshProjectStatus(checkLAN: false)
         }
     }
@@ -673,20 +772,24 @@ final class WorkbenchModel: ObservableObject {
         lanOK = lan.ok
         lanMessage = lan.message
         statusItems = [
-            StatusItem(id: "project", label: "项目", ok: project.ok, message: project.message),
-            StatusItem(id: "qoder", label: "Qoder", ok: qoder.ok, message: qoder.message),
-            StatusItem(id: "tasks", label: "任务", ok: tasks.ok, message: tasks.message),
-            StatusItem(id: "runs", label: "Runs", ok: runs.ok, message: runs.message),
-            StatusItem(id: "lan", label: "LAN", ok: lan.ok, message: lan.message)
+            StatusItem(id: "project", label: "项目", ok: project.ok, message: project.ok ? "已打开" : "缺失"),
+            StatusItem(id: "qoder", label: "Qoder", ok: qoder.ok, message: qoder.ok ? "已就绪" : "未配置"),
+            StatusItem(id: "tasks", label: "任务", ok: tasks.ok, message: tasks.ok ? "有任务" : "无任务"),
+            StatusItem(id: "runs", label: "Runs", ok: runs.ok, message: runs.ok ? "已初始化" : "缺失"),
+            StatusItem(id: "lan", label: "LAN", ok: lan.ok, message: lan.ok ? "正常" : "需检查")
         ]
 
         if let qoderObject = checks["qoder"] as? [String: Any] {
             qoderRunnerCommand = qoderObject["runner_command"] as? String ?? qoderRunnerCommand
+            qoderRunnerPath = qoderObject["runner_path"] as? String ?? qoderRunnerPath
+            qoderSource = qoderObject["source"] as? String ?? qoderSource
+            qoderRegistryPath = qoderObject["registry_path"] as? String ?? qoderRegistryPath
             if let config = qoderObject["config"] as? String, !config.isEmpty {
                 qoderConfigPath = config
             } else if let configPath = qoderObject["config_path"] as? String, !configPath.isEmpty {
                 qoderConfigPath = configPath
             }
+            qoderResolvedConfigPath = qoderObject["config_path"] as? String ?? qoderResolvedConfigPath
             qoderProfile = qoderObject["profile"] as? String ?? qoderProfile
         }
 
@@ -709,13 +812,22 @@ final class WorkbenchModel: ObservableObject {
         }
         qoderOK = object["ok"] as? Bool ?? false
         qoderMessage = object["message"] as? String ?? ""
+        qoderSource = object["source"] as? String ?? ""
         if let runner = object["runner_path"] as? String, !runner.isEmpty {
+            qoderRunnerPath = runner
             qoderRunnerCommand = runner
         }
         if let config = object["config_path"] as? String, !config.isEmpty {
+            qoderResolvedConfigPath = config
             qoderConfigPath = config
         }
+        qoderRegistryPath = object["registry_path"] as? String ?? qoderRegistryPath
         qoderProfile = object["profile"] as? String ?? qoderProfile
+    }
+
+    private func shortName(_ path: String) -> String {
+        guard !path.isEmpty else { return "未设置" }
+        return URL(fileURLWithPath: path).lastPathComponent
     }
 
     private func checkValue(_ name: String, in checks: [String: Any]) -> (ok: Bool, message: String) {

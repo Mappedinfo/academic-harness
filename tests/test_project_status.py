@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from academic_harness.project import init_project, project_status, set_lan_config, set_qoder_config
+from academic_harness.project import init_project, project_status, reset_qoder_config, set_lan_config, set_qoder_config
 from academic_harness.yamlio import dump_yaml, load_yaml
 
 
@@ -77,6 +77,21 @@ class ProjectStatusTests(unittest.TestCase):
         self.assertEqual(data["lan"]["ssh_alias"], "lab-gpu-01")
         self.assertTrue(data["lan"]["enabled"])
         self.assertTrue(status["checks"]["lan"]["ok"])
+
+    def test_default_and_reset_qoder_config_use_system_discovery(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = init_project(Path(tmp) / "demo")
+            data = load_yaml(project / "project.yaml")
+            self.assertNotIn("runner_command", data["qoder"])
+            self.assertNotIn("config", data["qoder"])
+
+            data["qoder"]["runner_command"] = "/bin/echo"
+            data["qoder"]["config"] = "qoder.local.json"
+            (project / "project.yaml").write_text(dump_yaml(data), encoding="utf-8")
+            reset_qoder_config(project)
+            reset_data = load_yaml(project / "project.yaml")
+
+        self.assertEqual(reset_data["qoder"], {"profile": "default"})
 
     def test_qoder_config_writer_preserves_project_fields(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
