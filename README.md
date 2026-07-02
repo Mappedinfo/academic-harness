@@ -33,7 +33,7 @@ Run outputs are written under `.workbench/runs/<run_id>/`.
 
 ## macOS App
 
-The SwiftUI shell is in `macos/AcademicHarnessApp`. It reads project files and invokes the installed `academic-harness` CLI; no web server is required.
+The SwiftUI shell is in `macos/AcademicHarnessApp`. It reads project files and invokes a bundled `academic-harness` CLI launcher from the app resources; no web server or shell `PATH` setup is required for the packaged app.
 
 ```bash
 ./scripts/build-app.sh
@@ -44,4 +44,3 @@ The SwiftUI shell is in `macos/AcademicHarnessApp`. It reads project files and i
 ```bash
 python -m unittest discover -s tests
 ```
-

@@ -136,7 +136,7 @@ struct RunItem: Identifiable, Hashable {
 @MainActor
 final class WorkbenchModel: ObservableObject {
     @Published var projectPath = ""
-    @Published var cliCommand = "academic-harness"
+    @Published var cliCommand = WorkbenchModel.defaultCLICommand()
     @Published var adapter = "qoder"
     @Published var tasks: [TaskItem] = []
     @Published var runs: [RunItem] = []
@@ -345,5 +345,18 @@ final class WorkbenchModel: ObservableObject {
             logText = String(logText.suffix(12000))
         }
     }
-}
 
+    private static func defaultCLICommand() -> String {
+        guard
+            let resourceURL = Bundle.main.resourceURL,
+            let bundledCLI = resourceURL
+                .appendingPathComponent("bin", isDirectory: true)
+                .appendingPathComponent("academic-harness")
+                .path.removingPercentEncoding,
+            FileManager.default.isExecutableFile(atPath: bundledCLI)
+        else {
+            return "academic-harness"
+        }
+        return bundledCLI
+    }
+}
