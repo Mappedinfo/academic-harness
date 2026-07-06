@@ -111,6 +111,9 @@ def build_parser() -> argparse.ArgumentParser:
             "cloud",
             "local_control",
             "local",
+            "lan",
+            "lan_experiment",
+            "lan_control",
             "hybrid",
             "hybrid_ai",
             "fake",
@@ -153,6 +156,7 @@ def _cmd_init(args: argparse.Namespace) -> int:
     print(f"sample_task={project_root / 'tasks' / 'sample_task.yaml'}")
     print(f"sample_cloud_task={project_root / 'tasks' / 'sample_cloud_experiment.yaml'}")
     print(f"sample_local_control_task={project_root / 'tasks' / 'sample_local_control.yaml'}")
+    print(f"sample_lan_traffic_task={project_root / 'tasks' / 'sample_lan_traffic_experiment.yaml'}")
     return 0
 
 

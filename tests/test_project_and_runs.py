@@ -83,6 +83,8 @@ class ProjectAndRunTests(unittest.TestCase):
 
             self.assertTrue((project / "project.yaml").exists())
             self.assertTrue((project / "tasks" / "sample_task.yaml").exists())
+            self.assertTrue((project / "tasks" / "sample_lan_traffic_experiment.yaml").exists())
+            self.assertTrue((project / "variables" / "registry.yaml").exists())
             self.assertTrue((project / "validators" / "validate_report.py").exists())
             self.assertTrue((project / ".workbench" / "index.sqlite").exists())
 
@@ -141,6 +143,75 @@ class ProjectAndRunTests(unittest.TestCase):
             self.assertEqual(manifest["adapter"], "local_control")
             self.assertEqual(manifest["mode"], "local_control")
             self.assertTrue((run_dir / "qoder" / "artifacts" / "local_control_plan.json").exists())
+
+    def test_lan_experiment_requires_lan_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = init_project(Path(tmp) / "demo")
+            manifest = run_task(
+                project / "tasks" / "sample_lan_traffic_experiment.yaml",
+                adapter="lan",
+                run_id="run_lan_blocked",
+                project_root=project,
+            )
+
+            self.assertEqual(manifest["status"], "blocked")
+            self.assertIn("LAN experiment requested", manifest["error"])
+
+    def test_lan_experiment_collects_remote_report_and_registries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = init_project(Path(tmp) / "demo")
+            data = load_yaml(project / "project.yaml")
+            data["lan"] = {
+                "enabled": True,
+                "server": "dev-container",
+                "project_root": "/remote/demo",
+                "ssh_alias": "docker-dev",
+            }
+            (project / "project.yaml").write_text(dump_yaml(data), encoding="utf-8")
+            import subprocess
+
+            real_subprocess_run = subprocess.run
+
+            def fake_run(command, capture_output=True, text=True, check=False, **kwargs):
+                class Completed:
+                    returncode = 0
+                    stdout = ""
+                    stderr = ""
+
+                if command[0] == "ssh":
+                    return Completed()
+                if command[0] == "scp":
+                    if str(command[1]).startswith("docker-dev:"):
+                        target = Path(command[2])
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        name = target.name
+                        if name == "report.md":
+                            target.write_text("# Remote LAN Report\n", encoding="utf-8")
+                        elif name == "summary.md":
+                            target.write_text("Remote summary\n", encoding="utf-8")
+                        elif name.endswith(".json"):
+                            target.write_text("{}\n", encoding="utf-8")
+                        else:
+                            target.write_text("figures:\n", encoding="utf-8")
+                    return Completed()
+
+                return real_subprocess_run(command, capture_output=capture_output, text=text, check=check, **kwargs)
+
+            with patch("academic_harness.executors.lan.subprocess.run", side_effect=fake_run):
+                manifest = run_task(
+                    project / "tasks" / "sample_lan_traffic_experiment.yaml",
+                    adapter="lan",
+                    run_id="run_lan",
+                    project_root=project,
+                )
+
+            run_dir = Path(manifest["run_dir"])
+            self.assertEqual(manifest["status"], "passed")
+            self.assertEqual(manifest["adapter"], "lan")
+            self.assertEqual(manifest["mode"], "lan_control")
+            self.assertTrue((run_dir / "report.md").exists())
+            self.assertTrue((run_dir / "lan" / "artifacts" / "variables.json").exists())
+            self.assertTrue((run_dir / "lan" / "figures" / "registry.yaml").exists())
 
     def test_cloud_experiment_fake_run_uses_v2_task_schema(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

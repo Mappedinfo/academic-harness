@@ -103,7 +103,7 @@ def run_task(
 
         state.enter("approved", "preflight policy allowed")
         state.enter("executing", adapter=resolved_adapter)
-        if resolved_adapter in {"qoder_cloud", "qoder_cli", "hybrid"}:
+        if resolved_adapter in {"qoder_cloud", "qoder_cli", "hybrid", "lan"}:
             state.enter("streaming", adapter=resolved_adapter)
 
         manifest["status"] = "running"
@@ -223,6 +223,8 @@ def _mode_for_adapter(adapter: str) -> str:
         return "hybrid"
     if adapter in {"local_control", "local"}:
         return "local_control"
+    if adapter in {"lan", "lan_experiment", "lan_control"}:
+        return "lan_control"
     return "local_control"
 
 
@@ -233,6 +235,8 @@ def _mode_for_resolved_adapter(task: dict[str, Any], resolved_adapter: str, requ
         return "full_cloud"
     if resolved_adapter == "hybrid":
         return "hybrid"
+    if resolved_adapter == "lan":
+        return "lan_control"
     if resolved_adapter == "local_control":
         return "local_control"
     return task.get("mode") or _mode_for_adapter(requested_adapter)

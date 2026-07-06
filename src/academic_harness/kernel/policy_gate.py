@@ -63,6 +63,11 @@ def check_preflight(ctx: RunContext) -> PolicyDecision:
         if local_ai_error:
             reasons.append(local_ai_error)
 
+    if ctx.resolved_adapter == "lan":
+        lan_error = _lan_config_error(ctx)
+        if lan_error:
+            reasons.append(lan_error)
+
     max_error = _managed_agent_limit_error(ctx)
     if max_error:
         reasons.append(max_error)
@@ -153,6 +158,7 @@ def _adapter_mode_mismatch(ctx: RunContext) -> bool:
         "full_cloud": {"qoder_cloud", "hybrid"},
         "hybrid": {"hybrid"},
         "local_control": {"local_control", "qoder_cli"},
+        "lan_control": {"lan"},
         "fake": {"fake"},
     }.get(declared_mode)
     return bool(expected and ctx.resolved_adapter not in expected)
@@ -183,6 +189,22 @@ def _local_ai_config_error(ctx: RunContext) -> str | None:
         resolve_local_ai_config(ctx.project)
     except Exception as exc:
         return f"missing or invalid local_ai config: {exc}"
+    return None
+
+
+def _lan_config_error(ctx: RunContext) -> str | None:
+    lan: dict[str, Any] = {}
+    if isinstance(ctx.project.get("lan"), dict):
+        lan.update(ctx.project["lan"])
+    for key in ["lan", "remote"]:
+        if isinstance(ctx.task.get(key), dict):
+            lan.update(ctx.task[key])
+    if not _bool(lan.get("enabled"), False):
+        return "LAN experiment requested but project/task LAN is disabled"
+    if not str(lan.get("ssh_alias") or "").strip():
+        return "LAN experiment requested but ssh_alias is missing"
+    if not str(lan.get("project_root") or "").strip():
+        return "LAN experiment requested but project_root is missing"
     return None
 
 

@@ -16,7 +16,7 @@ def init_project(project_dir: Path, force: bool = False) -> Path:
     project_dir.mkdir(parents=True, exist_ok=True)
     _write_if_missing(project_dir / PROJECT_FILE, dump_yaml(_default_project(project_dir.name)), force)
 
-    for folder in ["tasks", "validators", "manuscript", "figures", "tables", f"{WORKBENCH_DIR}/runs"]:
+    for folder in ["tasks", "validators", "manuscript", "variables", "figures", "tables", f"{WORKBENCH_DIR}/runs"]:
         (project_dir / folder).mkdir(parents=True, exist_ok=True)
 
     _write_if_missing(project_dir / "tasks" / "sample_prompt.md", _sample_prompt(), force)
@@ -24,8 +24,11 @@ def init_project(project_dir: Path, force: bool = False) -> Path:
     _write_if_missing(project_dir / "tasks" / "sample_task.yaml", dump_yaml(_sample_task()), force)
     _write_if_missing(project_dir / "tasks" / "sample_cloud_experiment.yaml", dump_yaml(_sample_cloud_task()), force)
     _write_if_missing(project_dir / "tasks" / "sample_local_control.yaml", dump_yaml(_sample_local_control_task()), force)
+    _write_if_missing(project_dir / "tasks" / "sample_lan_traffic_experiment.yaml", dump_yaml(_sample_lan_traffic_task()), force)
+    _write_if_missing(project_dir / "tasks" / "sample_lan_traffic_prompt.md", _sample_lan_traffic_prompt(), force)
     _write_if_missing(project_dir / "validators" / "validate_report.py", _validator_script(), force)
     _write_if_missing(project_dir / "manuscript" / "main.qmd", "# Manuscript\n\n", force)
+    _write_if_missing(project_dir / "variables" / "registry.yaml", "variables:\n", force)
     _write_if_missing(project_dir / "figures" / "registry.yaml", "figures:\n", force)
     _write_if_missing(project_dir / "tables" / "registry.yaml", "tables:\n", force)
     init_index(project_dir)
@@ -161,7 +164,7 @@ def load_project(path: Path) -> tuple[Path, dict[str, Any]]:
 
 
 def ensure_project_dirs(project_root: Path) -> None:
-    for folder in ["tasks", "validators", "manuscript", "figures", "tables"]:
+    for folder in ["tasks", "validators", "manuscript", "variables", "figures", "tables"]:
         (project_root / folder).mkdir(parents=True, exist_ok=True)
     workbench_dir(project_root).mkdir(parents=True, exist_ok=True)
     (workbench_dir(project_root) / "runs").mkdir(parents=True, exist_ok=True)
@@ -257,8 +260,16 @@ def _default_project(name: str) -> dict[str, Any]:
             "tasks_dir": "tasks",
             "validators_dir": "validators",
             "manuscript_dir": "manuscript",
+            "variables_dir": "variables",
             "figures_dir": "figures",
             "tables_dir": "tables",
+        },
+        "variables": {},
+        "lan": {
+            "enabled": False,
+            "server": "",
+            "project_root": "",
+            "ssh_alias": "",
         },
         "qoder": {
             "profile": "default",
@@ -356,6 +367,54 @@ def _sample_local_control_task() -> dict[str, Any]:
     }
 
 
+def _sample_lan_traffic_task() -> dict[str, Any]:
+    return {
+        "task_id": "sample_lan_traffic_experiment",
+        "type": "lan_experiment",
+        "mode": "lan_control",
+        "title": "Traffic Flow Generation and Prediction LAN Experiment",
+        "input": {
+            "prompt_file": "tasks/sample_lan_traffic_prompt.md",
+        },
+        "experiment": {
+            "topic": "traffic flow generation and prediction",
+            "metrics": ["MAE", "RMSE", "MAPE"],
+            "variables": {
+                "prediction_horizon_minutes": [15, 30, 60],
+                "history_window_minutes": [30, 60, 120],
+                "model_family": ["stgcn", "dcrnn", "transformer"],
+            },
+        },
+        "output": {
+            "expected": [
+                "report.md",
+                "summary.md",
+                "lan/artifacts/variables.json",
+                "lan/artifacts/metrics.json",
+                "lan/figures/registry.yaml",
+                "lan/tables/registry.yaml",
+            ],
+            "collect": [
+                "report.md",
+                "summary.md",
+                "artifacts/variables.json",
+                "artifacts/metrics.json",
+                "artifacts/experiment_plan.json",
+                "artifacts/remote_data_contract.json",
+                "figures/registry.yaml",
+                "tables/registry.yaml",
+            ],
+        },
+        "policy": {
+            "allow_cloud_web": False,
+            "allow_private_data": False,
+            "remote_data_only": True,
+            "require_artifact_delivery": True,
+        },
+        "validators": ["validators/validate_report.py"],
+    }
+
+
 def _sample_prompt() -> str:
     return (
         "Write a concise research note about what an academic harness should track. "
@@ -368,6 +427,15 @@ def _sample_cloud_prompt() -> str:
         "Design a small academic experiment plan for comparing inference-time scaling "
         "with larger pretrained models on reasoning tasks. Include decomposition, "
         "evidence to collect, expected artifacts, validation checks, and limitations.\n"
+    )
+
+
+def _sample_lan_traffic_prompt() -> str:
+    return (
+        "Run a remote-only LAN experiment plan for traffic flow generation and prediction. "
+        "Use data only on the remote worker. Compare short-horizon forecasting settings, "
+        "track variables, register figures/tables, and return only a report, summary, "
+        "variable registry, figure registry, table registry, and lightweight metrics metadata.\n"
     )
 
 

@@ -36,6 +36,7 @@ uv run academic-harness project set-local-ai --project /path/to/project --enable
 uv run academic-harness project set-lan --project /path/to/project --enabled true --server lab-gpu-01 --project-root /data/projects/demo --ssh-alias lab-gpu-01
 uv run academic-harness task run /path/to/project/tasks/sample_task.yaml --adapter fake
 uv run academic-harness task run /path/to/project/tasks/sample_local_control.yaml --adapter auto
+uv run academic-harness task run /path/to/project/tasks/sample_lan_traffic_experiment.yaml --adapter lan
 uv run academic-harness task run /path/to/project/tasks/sample_cloud_experiment.yaml --adapter qoder_cloud
 uv run academic-harness task run /path/to/project/tasks/sample_cloud_experiment.yaml --adapter qoder_cloud --managed-agents on --managed-agent-count 4 --delegation-strategy agent_sync
 uv run academic-harness task run /path/to/project/tasks/sample_cloud_experiment.yaml --adapter hybrid
@@ -48,6 +49,7 @@ Executors:
 
 - `fake`: offline fixture path for UI and validator checks.
 - `local_control`: local control-plan run; no remote AI agent is started.
+- `lan`: SSH-based LAN experiment run; uploads only task specs, prompt text, and variable metadata, keeps source data remote, and collects reports plus lightweight registries.
 - `hybrid`: local AI preflight and postflight around a Qoder Cloud execution.
 - `qoder`: compatibility path through the registered `qoder-run` CLI.
 - `qoder_cloud`: native Qoder Cloud session path for full-cloud runs.
@@ -144,7 +146,7 @@ The SwiftUI shell is in `macos/AcademicHarnessApp`. It reads project files and i
 ./scripts/build-app.sh
 ```
 
-The app supports project creation, project/Qoder/task/run/LAN status checks, task YAML editing, prompt Markdown editing, explicit `Fake 测试`, `本地把控`, `全云端`, and `Qoder CLI` actions, run file browsing, and LAN worker configuration. LAN worker execution is still configuration/check only.
+The app supports project creation, project/Qoder/task/run/LAN status checks, task YAML editing, prompt Markdown editing, explicit `Fake 测试`, `本地把控`, `局域网实验`, `全云端`, and `Qoder CLI` actions, run file browsing, and LAN worker configuration. LAN worker execution is remote-data-only by default: local runs collect reports and lightweight registries, not raw datasets.
 
 ## Tests
 
