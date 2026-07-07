@@ -186,7 +186,7 @@ def _local_ai_config_error(ctx: RunContext) -> str | None:
     try:
         from ..local_ai import resolve_local_ai_config
 
-        resolve_local_ai_config(ctx.project)
+        resolve_local_ai_config(ctx.project, project_root=ctx.project_root)
     except Exception as exc:
         return f"missing or invalid local_ai config: {exc}"
     return None

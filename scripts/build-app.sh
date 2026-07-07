@@ -16,6 +16,7 @@ export CLANG_MODULE_CACHE_PATH
 swift build -c release --package-path "$APP_ROOT"
 cp "$APP_ROOT/.build/release/AcademicHarnessApp" "$TMP_APP/Contents/MacOS/AcademicHarnessApp"
 chmod +x "$TMP_APP/Contents/MacOS/AcademicHarnessApp"
+python3 "$ROOT/scripts/generate-app-icon.py" "$TMP_APP/Contents/Resources/AcademicHarness.icns"
 while IFS= read -r source_file; do
   relative_path="${source_file#"$ROOT/src/"}"
   target_file="$TMP_APP/Contents/Resources/python/$relative_path"
@@ -42,6 +43,8 @@ cat > "$TMP_APP/Contents/Info.plist" <<'PLIST'
   <string>com.mappedinfo.academic-harness</string>
   <key>CFBundleName</key>
   <string>Academic Harness</string>
+  <key>CFBundleIconFile</key>
+  <string>AcademicHarness.icns</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleVersion</key>

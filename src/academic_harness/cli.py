@@ -16,7 +16,7 @@ from .project import (
 )
 from .qoder_dependency import DEFAULT_QODER_REPO_URL, discover_qoder_runner, install_qoder_runner
 from .paths import PROJECT_FILE
-from .runs import list_project_runs, rerun_validators, run_task, show_run
+from .runs import link_pi_session, list_project_runs, list_project_tasks, read_run_trace, rerun_validators, run_task, show_run
 from .yamlio import load_yaml
 
 
@@ -64,6 +64,8 @@ def build_parser() -> argparse.ArgumentParser:
     project_local_ai.add_argument("--model")
     project_local_ai.add_argument("--api-key-env")
     project_local_ai.add_argument("--timeout-seconds", type=int)
+    project_local_ai.add_argument("--transport", choices=["auto", "urllib", "curl"])
+    project_local_ai.add_argument("--env-file")
     project_local_ai.set_defaults(func=_cmd_project_set_local_ai)
 
     project_qoder = project_subparsers.add_parser("set-qoder", help="write Qoder runner config")
@@ -98,6 +100,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     task_parser = subparsers.add_parser("task", help="task commands")
     task_subparsers = task_parser.add_subparsers(dest="task_command", required=True)
+    task_list = task_subparsers.add_parser("list", help="list project tasks")
+    task_list.add_argument("--project", required=True, type=Path)
+    task_list.add_argument("--json", action="store_true")
+    task_list.set_defaults(func=_cmd_task_list)
+
     task_run = task_subparsers.add_parser("run", help="run a task")
     task_run.add_argument("task_yaml", type=Path)
     task_run.add_argument("--project", type=Path, help="project root; defaults to nearest project.yaml")
@@ -125,6 +132,7 @@ def build_parser() -> argparse.ArgumentParser:
     task_run.add_argument("--managed-agent-count", type=int, choices=[3, 4, 5])
     task_run.add_argument("--require-managed-agents", action="store_true")
     task_run.add_argument("--delegation-strategy", choices=["agent_sync", "child_threads"])
+    task_run.add_argument("--json", action="store_true")
     task_run.set_defaults(func=_cmd_task_run)
 
     runs_parser = subparsers.add_parser("runs", help="run history commands")
@@ -141,9 +149,24 @@ def build_parser() -> argparse.ArgumentParser:
     run_show.add_argument("--project", required=True, type=Path)
     run_show.set_defaults(func=_cmd_run_show)
 
+    run_link_pi = run_subparsers.add_parser("link-pi", help="link a run manifest to a Pi session entry")
+    run_link_pi.add_argument("run_id")
+    run_link_pi.add_argument("--project", required=True, type=Path)
+    run_link_pi.add_argument("--pi-session-id", required=True)
+    run_link_pi.add_argument("--pi-entry-id", required=True)
+    run_link_pi.add_argument("--pi-session-file")
+    run_link_pi.set_defaults(func=_cmd_run_link_pi)
+
+    run_trace = run_subparsers.add_parser("trace", help="show a run trace")
+    run_trace.add_argument("run_id")
+    run_trace.add_argument("--project", required=True, type=Path)
+    run_trace.add_argument("--json", action="store_true")
+    run_trace.set_defaults(func=_cmd_run_trace)
+
     validate_parser = subparsers.add_parser("validate", help="rerun validators for a run")
     validate_parser.add_argument("run_id")
     validate_parser.add_argument("--project", required=True, type=Path)
+    validate_parser.add_argument("--json", action="store_true")
     validate_parser.set_defaults(func=_cmd_validate)
 
     return parser
@@ -195,6 +218,8 @@ def _cmd_project_set_local_ai(args: argparse.Namespace) -> int:
         model=args.model,
         api_key_env=args.api_key_env,
         timeout_seconds=args.timeout_seconds,
+        transport=args.transport,
+        env_file=args.env_file,
     )
     print(json.dumps(status, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
@@ -249,6 +274,29 @@ def _cmd_qoder_install(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_task_list(args: argparse.Namespace) -> int:
+    tasks = list_project_tasks(args.project)
+    if args.json:
+        print(json.dumps(tasks, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
+    if not tasks:
+        print("No tasks")
+        return 0
+    print("task_id\ttype\tmode\tpath")
+    for task in tasks:
+        print(
+            "\t".join(
+                [
+                    str(task.get("task_id") or ""),
+                    str(task.get("type") or ""),
+                    str(task.get("mode") or ""),
+                    str(task.get("relative_path") or task.get("path") or ""),
+                ]
+            )
+        )
+    return 0
+
+
 def _cmd_task_run(args: argparse.Namespace) -> int:
     manifest = run_task(
         args.task_yaml,
@@ -262,7 +310,10 @@ def _cmd_task_run(args: argparse.Namespace) -> int:
             "delegation_strategy": args.delegation_strategy,
         },
     )
-    _print_run_summary(manifest)
+    if args.json:
+        print(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_run_summary(manifest)
     return 0 if manifest["status"] == "passed" else 1
 
 
@@ -295,9 +346,36 @@ def _cmd_run_show(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_run_link_pi(args: argparse.Namespace) -> int:
+    manifest = link_pi_session(
+        args.run_id,
+        args.project,
+        pi_session_id=args.pi_session_id,
+        pi_entry_id=args.pi_entry_id,
+        pi_session_file=args.pi_session_file,
+    )
+    print(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0
+
+
+def _cmd_run_trace(args: argparse.Namespace) -> int:
+    trace = read_run_trace(args.run_id, args.project)
+    if args.json:
+        print(json.dumps(trace, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
+    print(f"run_id={trace['run_id']}")
+    print(f"trace={trace['trace_path']}")
+    for event in trace["events"]:
+        print(f"{event.get('ts', '')}\t{event.get('type', '')}")
+    return 0
+
+
 def _cmd_validate(args: argparse.Namespace) -> int:
     manifest = rerun_validators(args.run_id, args.project)
-    _print_run_summary(manifest)
+    if args.json:
+        print(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_run_summary(manifest)
     return 0 if manifest["status"] == "passed" else 1
 
 

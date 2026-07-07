@@ -4,6 +4,7 @@ import json
 import os
 import signal
 import hashlib
+import socket
 import time
 import urllib.error
 import urllib.request
@@ -46,6 +47,7 @@ class QoderCloudConfig:
     config_path: Path | None
     agent_version: str | None = None
     managed_agents: dict[str, Any] | None = None
+    network_mode: str = "auto"
 
 
 @dataclass(frozen=True)
@@ -133,7 +135,8 @@ class QoderCloudClient:
     def __init__(self, config: QoderCloudConfig, request_timeout: int = 120) -> None:
         self.config = config
         self.request_timeout = request_timeout
-        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        self.effective_network_mode = "direct" if config.network_mode == "auto" else config.network_mode
+        self.opener = self._build_opener(self.effective_network_mode)
 
     def create_session(self, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -168,6 +171,12 @@ class QoderCloudClient:
         try:
             return self.opener.open(request, timeout=self.request_timeout)
         except urllib.error.URLError as exc:
+            if self._should_fallback_to_system(exc):
+                self._switch_to_system_network()
+                try:
+                    return self.opener.open(request, timeout=self.request_timeout)
+                except urllib.error.URLError as retry_exc:
+                    raise QoderCloudError(f"Qoder event stream failed after system-network fallback: {retry_exc}") from retry_exc
             raise QoderCloudError(f"Qoder event stream failed: {exc}") from exc
 
     def cancel_session(self, session_id: str) -> dict[str, Any]:
@@ -218,7 +227,18 @@ class QoderCloudClient:
             error_body = exc.read().decode("utf-8", errors="replace")
             raise QoderCloudHTTPError(exc.code, error_body) from exc
         except urllib.error.URLError as exc:
-            raise QoderCloudError(f"Qoder request failed: {exc}") from exc
+            if self._should_fallback_to_system(exc):
+                self._switch_to_system_network()
+                try:
+                    with self.opener.open(request, timeout=self.request_timeout) as response:
+                        body = response.read().decode("utf-8")
+                except urllib.error.HTTPError as retry_http:
+                    error_body = retry_http.read().decode("utf-8", errors="replace")
+                    raise QoderCloudHTTPError(retry_http.code, error_body) from retry_http
+                except urllib.error.URLError as retry_exc:
+                    raise QoderCloudError(f"Qoder request failed after system-network fallback: {retry_exc}") from retry_exc
+            else:
+                raise QoderCloudError(f"Qoder request failed: {exc}") from exc
         if not body.strip():
             return {}
         try:
@@ -231,6 +251,22 @@ class QoderCloudClient:
 
     def _url(self, path: str) -> str:
         return f"{self.config.base_url.rstrip('/')}/{path.lstrip('/')}"
+
+    def _build_opener(self, mode: str):
+        if mode == "system":
+            return urllib.request.build_opener()
+        return urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+    def _should_fallback_to_system(self, exc: urllib.error.URLError) -> bool:
+        return (
+            self.config.network_mode == "auto"
+            and self.effective_network_mode == "direct"
+            and _is_direct_network_resolution_error(exc)
+        )
+
+    def _switch_to_system_network(self) -> None:
+        self.effective_network_mode = "system"
+        self.opener = self._build_opener("system")
 
 
 def run_qoder_cloud(
@@ -246,6 +282,7 @@ def run_qoder_cloud(
     config = resolve_qoder_cloud_config(project_root, project, task)
     client = QoderCloudClient(config)
     managed_runtime = ensure_managed_agent_set(project_root, project, task, client, config)
+    effective_network_mode = client.effective_network_mode
     if managed_runtime.get("active") and isinstance(managed_runtime.get("coordinator"), dict):
         coordinator = managed_runtime["coordinator"]
         config = replace(
@@ -254,6 +291,8 @@ def run_qoder_cloud(
             agent_version=str(coordinator.get("version")) if coordinator.get("version") is not None else None,
         )
         client = QoderCloudClient(config)
+        if effective_network_mode == "system" and config.network_mode == "auto":
+            client._switch_to_system_network()
     (qoder_dir / "agent_roster.json").write_text(
         json.dumps(managed_runtime, ensure_ascii=False, indent=2), encoding="utf-8"
     )
@@ -338,6 +377,8 @@ def run_qoder_cloud(
         "profile": config.profile,
         "base_url": config.base_url,
         "config_path": str(config.config_path) if config.config_path else None,
+        "network_mode": config.network_mode,
+        "network_mode_effective": client.effective_network_mode,
         "session_id": session_id or None,
         "managed_agents": managed_runtime,
         "report_path": str((qoder_dir / "report.md").resolve()) if (qoder_dir / "report.md").exists() else None,
@@ -390,6 +431,15 @@ def resolve_qoder_cloud_config(
     agent_version = coordinator.get("agent_version") or profile_config.get("agent_version")
     token_env = str(profile_config.get("token_env") or qoder_project.get("token_env") or "QODER_PAT")
     env_file = profile_config.get("env_file") or qoder_project.get("env_file")
+    network_mode = _network_mode(
+        coordinator.get("network_mode")
+        or coordinator.get("transport")
+        or profile_config.get("network_mode")
+        or profile_config.get("transport")
+        or qoder_project.get("network_mode")
+        or qoder_project.get("transport")
+        or "auto"
+    )
     token = _resolve_token(token_env, config_path, env_file)
     managed_agents = _merged_managed_agent_config(profile_config, qoder_project, task)
     missing = []
@@ -410,6 +460,7 @@ def resolve_qoder_cloud_config(
         profile=profile,
         config_path=config_path,
         managed_agents=managed_agents,
+        network_mode=network_mode,
     )
 
 
@@ -562,12 +613,16 @@ def ensure_managed_agent_set(
 def qoder_models_status(project_root: Path, project: dict[str, Any]) -> dict[str, Any]:
     try:
         config = resolve_qoder_cloud_config(project_root, project, task={})
-        models = _model_summaries_from_response(QoderCloudClient(config, request_timeout=15).list_models())
+        client = QoderCloudClient(config, request_timeout=15)
+        models = _model_summaries_from_response(client.list_models())
+        effective_network_mode = client.effective_network_mode
     except Exception as exc:
         return {
             "ok": False,
             "available_models": [],
             "ids": [],
+            "network_mode": "unknown",
+            "network_mode_effective": "unknown",
             "message": f"models unavailable: {exc}",
         }
     ids = _model_ids(models)
@@ -576,12 +631,16 @@ def qoder_models_status(project_root: Path, project: dict[str, Any]) -> dict[str
             "ok": False,
             "available_models": models,
             "ids": [],
+            "network_mode": config.network_mode,
+            "network_mode_effective": effective_network_mode,
             "message": "no enabled Qoder models returned for this account",
         }
     return {
         "ok": True,
         "available_models": models,
         "ids": ids,
+        "network_mode": config.network_mode,
+        "network_mode_effective": effective_network_mode,
         "message": f"available models: {', '.join(ids)}",
     }
 
@@ -1134,6 +1193,44 @@ def _delegation_strategy(value: Any) -> str:
     if text in {"child_threads", "thread", "threads", "create_agent"}:
         return "child_threads"
     return "agent_sync"
+
+
+def _network_mode(value: Any) -> str:
+    text = str(value or "auto").strip().lower()
+    if text in {"auto", "direct", "system"}:
+        return text
+    raise QoderCloudError(f"unsupported qoder network_mode: {value}; use auto, direct, or system")
+
+
+def _is_direct_network_resolution_error(exc: urllib.error.URLError) -> bool:
+    reason = exc.reason
+    if isinstance(reason, socket.gaierror):
+        return True
+    if isinstance(reason, OSError):
+        message = str(reason).lower()
+        return any(
+            fragment in message
+            for fragment in [
+                "nodename nor servname provided",
+                "name or service not known",
+                "temporary failure in name resolution",
+                "cannot assign requested address",
+                "network is unreachable",
+                "no route to host",
+            ]
+        )
+    message = str(exc).lower()
+    return any(
+        fragment in message
+        for fragment in [
+            "nodename nor servname provided",
+            "name or service not known",
+            "temporary failure in name resolution",
+            "cannot find host",
+            "network is unreachable",
+            "no route to host",
+        ]
+    )
 
 
 def _agent_name(project_id: str, label: str) -> str:

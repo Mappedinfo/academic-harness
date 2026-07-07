@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Academic Harness</title>
+  <desc id="desc">A rounded-square research workbench mark with connected nodes and a central harness glyph.</desc>
+  <defs>
+    <linearGradient id="bg" x1="128" y1="96" x2="896" y2="928" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fbfdf8"/>
+      <stop offset="0.55" stop-color="#eef7f2"/>
+      <stop offset="1" stop-color="#e7f0ff"/>
+    </linearGradient>
+    <linearGradient id="beam" x1="294" y1="236" x2="730" y2="788" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1f2933"/>
+      <stop offset="1" stop-color="#334155"/>
+    </linearGradient>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="224" fill="#d7dde5" opacity="0.42"/>
+  <rect x="82" y="70" width="860" height="860" rx="208" fill="url(#bg)"/>
+  <path d="M268 734V290c0-28 22-50 50-50h42c28 0 50 22 50 50v138h204V290c0-28 22-50 50-50h42c28 0 50 22 50 50v444c0 28-22 50-50 50h-42c-28 0-50-22-50-50V584H410v150c0 28-22 50-50 50h-42c-28 0-50-22-50-50Z" fill="url(#beam)"/>
+  <rect x="381" y="479" width="262" height="84" rx="42" fill="#00a896"/>
+  <path d="M284 314c84 34 164 66 240 106 78 41 151 92 218 157" fill="none" stroke="#2f80ed" stroke-width="34" stroke-linecap="round"/>
+  <path d="M281 723c84-43 161-83 239-126 77-43 150-90 222-145" fill="none" stroke="#f2c94c" stroke-width="28" stroke-linecap="round" opacity="0.95"/>
+  <circle cx="282" cy="312" r="58" fill="#2f80ed"/>
+  <circle cx="742" cy="451" r="52" fill="#eb5757"/>
+  <circle cx="282" cy="722" r="58" fill="#f2c94c"/>
+  <circle cx="742" cy="578" r="54" fill="#00a896"/>
+  <circle cx="512" cy="521" r="42" fill="#ffffff"/>
+  <circle cx="512" cy="521" r="22" fill="#1f2933"/>
+</svg>

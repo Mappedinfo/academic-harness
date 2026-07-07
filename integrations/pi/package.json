@@ -1,0 +1,35 @@
+{
+  "name": "@mappedinfo/pi-academic-harness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Pi package exposing Academic Harness kernel tools.",
+  "scripts": {
+    "pi": "pi",
+    "pi:help": "pi --help",
+    "pi:install": "pi install .",
+    "pi:install-local": "pi install . --local --approve",
+    "pi:dev": "pi -e extensions/academic-harness.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "latest",
+    "@earendil-works/pi-tui": "^0.80.3",
+    "typebox": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  },
+  "pi": {
+    "extensions": [
+      "extensions/academic-harness.ts"
+    ],
+    "skills": [
+      "skills"
+    ],
+    "prompts": [
+      "prompts"
+    ]
+  }
+}

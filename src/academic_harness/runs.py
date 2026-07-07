@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import copy
+import json
 from pathlib import Path
 from typing import Any
 
 from .executors import ExecutorError, normalize_executor_outputs, resolve_executor_adapter, run_executor
 from .index import list_runs, upsert_run
 from .kernel import RunContext, RunStateMachine, TraceWriter, check_artifacts, check_preflight, collect_artifacts
-from .paths import MANIFEST_FILE, find_project_root, run_dir
+from .paths import MANIFEST_FILE, find_project_root, project_relative, run_dir
 from .project import ensure_project_dirs, load_project
 from .timeutil import timestamp_id, utc_now_iso
 from .validators import run_artifact_validators, run_validators
@@ -181,9 +182,98 @@ def show_run(run_id: str, project_root: Path) -> dict[str, Any]:
     return read_json(run_dir(root, run_id) / MANIFEST_FILE)
 
 
+def link_pi_session(
+    run_id: str,
+    project_root: Path,
+    pi_session_id: str,
+    pi_entry_id: str,
+    pi_session_file: str | None = None,
+) -> dict[str, Any]:
+    root = find_project_root(project_root)
+    output_dir = run_dir(root, run_id)
+    manifest_path = output_dir / MANIFEST_FILE
+    manifest = read_json(manifest_path)
+    pi_link = {
+        "run_id": run_id,
+        "pi_session_id": pi_session_id,
+        "pi_entry_id": pi_entry_id,
+        "linked_at": utc_now_iso(),
+    }
+    if pi_session_file:
+        pi_link["pi_session_file"] = pi_session_file
+    manifest["pi"] = pi_link
+    TraceWriter(output_dir, run_id).write("pi.linked", pi_link)
+    write_json(manifest_path, manifest)
+    upsert_run(root, manifest)
+    return manifest
+
+
 def list_project_runs(project_root: Path) -> list[dict[str, Any]]:
     root = find_project_root(project_root)
     return list_runs(root)
+
+
+def list_project_tasks(project_root: Path) -> list[dict[str, Any]]:
+    root, project = load_project(project_root)
+    tasks_dir = root / str((project.get("local") or {}).get("tasks_dir") or "tasks")
+    tasks: list[dict[str, Any]] = []
+    for path in sorted([*tasks_dir.glob("*.yaml"), *tasks_dir.glob("*.yml")]):
+        try:
+            task = load_yaml(path)
+        except Exception as error:
+            tasks.append(
+                {
+                    "path": str(path),
+                    "relative_path": project_relative(root, path),
+                    "valid": False,
+                    "error": str(error),
+                }
+            )
+            continue
+        input_config = task.get("input") if isinstance(task.get("input"), dict) else {}
+        tasks.append(
+            {
+                "task_id": task.get("task_id") or path.stem,
+                "type": task.get("type") or "task",
+                "mode": task.get("mode") or "auto",
+                "title": task.get("title") or task.get("task_id") or path.stem,
+                "path": str(path),
+                "relative_path": project_relative(root, path),
+                "prompt_file": input_config.get("prompt_file"),
+                "valid": True,
+            }
+        )
+    return tasks
+
+
+def read_run_trace(run_id: str, project_root: Path) -> dict[str, Any]:
+    root = find_project_root(project_root)
+    manifest_path = run_dir(root, run_id) / MANIFEST_FILE
+    manifest = read_json(manifest_path)
+    trace_path = Path(str(manifest.get("trace_path") or run_dir(root, run_id) / "trace.jsonl"))
+    events: list[dict[str, Any]] = []
+    parse_errors: list[dict[str, Any]] = []
+    if trace_path.exists():
+        for index, line in enumerate(trace_path.read_text(encoding="utf-8").splitlines(), start=1):
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError as error:
+                parse_errors.append({"line": index, "error": str(error)})
+                continue
+            if isinstance(event, dict):
+                events.append(event)
+            else:
+                parse_errors.append({"line": index, "error": "expected JSON object"})
+    return {
+        "run_id": run_id,
+        "project_root": str(root),
+        "manifest_path": str(manifest_path),
+        "trace_path": str(trace_path),
+        "events": events,
+        "parse_errors": parse_errors,
+    }
 
 
 def _attach_primary_paths(manifest: dict[str, Any], output_dir: Path) -> None:

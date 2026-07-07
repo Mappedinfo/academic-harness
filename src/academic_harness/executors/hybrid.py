@@ -21,7 +21,7 @@ def run_hybrid(
     local_ai_dir = run_dir / "local_ai"
     local_ai_dir.mkdir(parents=True, exist_ok=True)
     try:
-        config = resolve_local_ai_config(project)
+        config = resolve_local_ai_config(project, project_root=project_root)
         client = LocalAIClient(config)
         prompt = prompt_text_for_task(project_root, task)
         (local_ai_dir / "input_prompt.md").write_text(prompt, encoding="utf-8")

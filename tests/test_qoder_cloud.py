@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import socket
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 
 from academic_harness.executors.qoder_cloud import (
@@ -62,6 +64,30 @@ class FailingManagedAgentClient:
         raise QoderCloudError("create failed")
 
 
+class FakeJSONResponse:
+    def __init__(self, body: str) -> None:
+        self.body = body.encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self.body
+
+
+class FailingDNSOpener:
+    def open(self, request, timeout=None):
+        raise urllib.error.URLError(socket.gaierror(8, "nodename nor servname provided"))
+
+
+class WorkingJSONOpener:
+    def open(self, request, timeout=None):
+        return FakeJSONResponse('{"id":"sess_fallback"}')
+
+
 class QoderCloudConfigTests(unittest.TestCase):
     def test_resolves_profile_config_and_env_file_token(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -76,7 +102,8 @@ class QoderCloudConfigTests(unittest.TestCase):
       "agent_version": "v1",
       "environment_id": "env_test",
       "token_env": "TEST_QODER_TOKEN",
-      "env_file": ".env"
+      "env_file": ".env",
+      "network_mode": "direct"
     }
   }
 }
@@ -98,6 +125,7 @@ class QoderCloudConfigTests(unittest.TestCase):
             self.assertEqual(resolved.environment_id, "env_test")
             self.assertEqual(resolved.profile, "default")
             self.assertEqual(resolved.token, "test-token")
+            self.assertEqual(resolved.network_mode, "direct")
 
     def test_create_session_sends_agent_as_string_even_with_version(self) -> None:
         captured: list[dict] = []
@@ -134,6 +162,29 @@ class QoderCloudConfigTests(unittest.TestCase):
         self.assertEqual(captured[0]["environment_id"], "env_base")
         self.assertEqual(captured[0]["metadata"]["run_id"], "run_test")
         self.assertNotIn("agent_version", captured[0])
+
+    def test_client_auto_network_mode_falls_back_to_system_on_dns_failure(self) -> None:
+        from academic_harness.executors.qoder_cloud import QoderCloudClient
+
+        config = QoderCloudConfig(
+            base_url="https://api.qoder.com.cn/api/v1/cloud",
+            agent_id="agent_base",
+            environment_id="env_base",
+            token="test-token",
+            profile="default",
+            config_path=None,
+            network_mode="auto",
+        )
+        client = QoderCloudClient(config)
+        first_opener = FailingDNSOpener()
+        openers = [WorkingJSONOpener()]
+        client._build_opener = lambda mode: openers.pop(0)  # type: ignore[method-assign]
+        client.opener = first_opener
+
+        session = client.create_session()
+
+        self.assertEqual(session["id"], "sess_fallback")
+        self.assertEqual(client.effective_network_mode, "system")
 
     def test_write_extractor_prefers_report_over_later_index_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

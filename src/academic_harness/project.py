@@ -73,7 +73,7 @@ def project_status(project_dir: Path, check_lan: bool = False, check_local_ai: b
         "message": "runs directory found" if runs_path.exists() else "runs directory missing",
     }
     status["checks"]["qoder"] = _qoder_status(project_dir, project)
-    status["checks"]["local_ai"] = local_ai_status(project, check_connection=check_local_ai)
+    status["checks"]["local_ai"] = local_ai_status(project, check_connection=check_local_ai, project_root=project_dir)
     status["checks"]["lan"] = _lan_status(project, check_lan=check_lan)
     status["ok"] = all(
         status["checks"][name]["ok"]
@@ -131,6 +131,8 @@ def set_local_ai_config(
     model: str | None,
     api_key_env: str | None,
     timeout_seconds: int | None,
+    transport: str | None = None,
+    env_file: str | None = None,
 ) -> dict[str, Any]:
     root, project = load_project(project_dir)
     local_ai = dict(project.get("local_ai") or {})
@@ -146,6 +148,10 @@ def set_local_ai_config(
         local_ai["api_key_env"] = api_key_env
     if timeout_seconds is not None:
         local_ai["timeout_seconds"] = timeout_seconds
+    if transport is not None:
+        local_ai["transport"] = transport
+    if env_file is not None:
+        local_ai["env_file"] = env_file
     project["local_ai"] = local_ai
     (root / PROJECT_FILE).write_text(dump_yaml(project), encoding="utf-8")
     return project_status(root, check_lan=False)
@@ -273,6 +279,7 @@ def _default_project(name: str) -> dict[str, Any]:
         },
         "qoder": {
             "profile": "default",
+            "network_mode": "auto",
             "managed_agents": {
                 "enabled": True,
                 "delegation_strategy": "agent_sync",
@@ -283,12 +290,13 @@ def _default_project(name: str) -> dict[str, Any]:
             },
         },
         "local_ai": {
-            "enabled": False,
+            "enabled": True,
             "provider": "openai_compatible",
-            "base_url": "http://127.0.0.1:11434/v1",
-            "model": "",
-            "api_key_env": "LOCAL_AI_API_KEY",
+            "base_url": "https://api.longcat.chat/openai",
+            "model": "LongCat-2.0",
+            "api_key_env": "LONG_CAT_API_KEY",
             "timeout_seconds": 120,
+            "transport": "auto",
         },
     }
 

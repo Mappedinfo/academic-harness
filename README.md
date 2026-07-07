@@ -32,9 +32,11 @@ uv run academic-harness project status --project /path/to/project --json
 uv run academic-harness qoder discover --project /path/to/project --json
 uv run academic-harness qoder install --project /path/to/project
 uv run academic-harness project reset-qoder --project /path/to/project
-uv run academic-harness project set-local-ai --project /path/to/project --enabled true --provider ollama --base-url http://127.0.0.1:11434/v1 --model qwen2.5:14b
+uv run academic-harness project set-local-ai --project /path/to/project --enabled true --provider openai_compatible --base-url https://api.longcat.chat/openai --model LongCat-2.0 --api-key-env LONG_CAT_API_KEY --env-file /path/to/ignored/.env --transport auto
 uv run academic-harness project set-lan --project /path/to/project --enabled true --server lab-gpu-01 --project-root /data/projects/demo --ssh-alias lab-gpu-01
+uv run academic-harness task list --project /path/to/project --json
 uv run academic-harness task run /path/to/project/tasks/sample_task.yaml --adapter fake
+uv run academic-harness task run /path/to/project/tasks/sample_task.yaml --adapter fake --json
 uv run academic-harness task run /path/to/project/tasks/sample_local_control.yaml --adapter auto
 uv run academic-harness task run /path/to/project/tasks/sample_lan_traffic_experiment.yaml --adapter lan
 uv run academic-harness task run /path/to/project/tasks/sample_cloud_experiment.yaml --adapter qoder_cloud
@@ -42,7 +44,9 @@ uv run academic-harness task run /path/to/project/tasks/sample_cloud_experiment.
 uv run academic-harness task run /path/to/project/tasks/sample_cloud_experiment.yaml --adapter hybrid
 uv run academic-harness runs list --project /path/to/project
 uv run academic-harness run show run_YYYYMMDD-HHMMSS --project /path/to/project
-uv run academic-harness validate run_YYYYMMDD-HHMMSS --project /path/to/project
+uv run academic-harness run trace run_YYYYMMDD-HHMMSS --project /path/to/project --json
+uv run academic-harness run link-pi run_YYYYMMDD-HHMMSS --project /path/to/project --pi-session-id SESSION --pi-entry-id ENTRY
+uv run academic-harness validate run_YYYYMMDD-HHMMSS --project /path/to/project --json
 ```
 
 Executors:
@@ -70,6 +74,7 @@ Optional project-level defaults:
 ```yaml
 qoder:
   profile: default
+  network_mode: auto  # auto | direct | system
   managed_agents:
     enabled: true
     mode: persistent
@@ -89,12 +94,15 @@ Hybrid AI adds a local controller/reviewer around the cloud run:
 local_ai:
   enabled: true
   provider: openai_compatible
-  base_url: http://127.0.0.1:11434/v1
-  model: qwen2.5:14b
-  api_key_env: LOCAL_AI_API_KEY
+  base_url: https://api.longcat.chat/openai
+  model: LongCat-2.0
+  api_key_env: LONG_CAT_API_KEY
+  env_file: /path/to/ignored/.env
   timeout_seconds: 120
+  transport: auto
 qoder:
   profile: default
+  network_mode: auto
   managed_agents:
     enabled: true
     delegation_strategy: agent_sync
@@ -103,13 +111,32 @@ qoder:
     model: ""  # leave empty to auto-select an enabled Qoder model for this account
 ```
 
-The local AI backend uses the OpenAI-compatible `/chat/completions` shape for `openai_compatible`, `ollama`, and `vllm`. If `api_key_env` is set and the environment variable is absent, status reports a warning but no secret value is written to metadata. In `hybrid` mode, local AI first writes advisory preflight outputs under `local_ai/`: `preflight.json`, `prompt_review.md`, `cloud_prompt.md`, `risk_report.md`, `prompt_patch.md`, and `policy_warnings.json`. Qoder then writes raw cloud outputs under `qoder/`. Local AI postflight writes advisory review outputs: `review.md`, `audit_report.md`, `artifact_summary.md`, `suspected_issues.json`, `final_report.md`, and top-level `report.md`. Final pass/fail still comes from artifact/local validators plus policy, not from the local AI text.
+The default development local AI backend is LongCat's OpenAI-compatible API. Academic Harness reads `LONG_CAT_API_URL`, `LONG_CAT_API_KEY`, and `LONG_CAT_MODEL` from the process environment, `local_ai.env_file`, the project `.env`, or the repo `.env`; secret values are never written to metadata. If these variables are absent, the generic defaults are `https://api.longcat.chat/openai`, `LONG_CAT_API_KEY`, and `LongCat-2.0`.
+
+The packaged macOS app runs the bundled CLI from inside `AcademicHarness.app`, so it cannot infer the source-repo `.env` unless `local_ai.env_file` is set or the project has its own `.env`. The UI exposes this as `Settings -> 本地 AI Backend -> Env File`; this field stores only a file path, not the API key.
+
+The Qoder and local AI HTTP clients default to direct-first networking. Qoder uses `qoder.network_mode: auto`: it first disables app-level proxies; if direct hostname resolution/connectivity fails, it falls back to system networking so a run can still complete. Set `direct` for strict no-proxy behavior, or `system` when you intentionally want macOS proxy/VPN/TUN routing.
+
+The local AI HTTP client uses `local_ai.transport: auto`: it first uses native `urllib` with an empty proxy handler; if the Python resolver cannot resolve the direct target, it falls back to `curl` with `noproxy=*`. `HTTP_PROXY`, `HTTPS_PROXY`, and `ALL_PROXY` are ignored by the direct paths. None of this can bypass a system-level transparent TUN/VPN route when macOS itself captures traffic; configure direct rules in Clash/Sing-box/etc. for `api.longcat.chat` and `qoder.com.cn` if needed.
+
+Typical direct-rule intent:
+
+```text
+DOMAIN,api.longcat.chat,DIRECT
+DOMAIN-SUFFIX,longcat.chat,DIRECT
+DOMAIN-SUFFIX,qoder.com.cn,DIRECT
+```
+
+Strict direct mode also needs a DNS path that can resolve these domains outside the proxy. If `project status --check-local-ai` reports `direct/no-proxy DNS failed`, the harness is already bypassing app-level proxies and the remaining fix belongs in the TUN/DNS client. If Qoder metadata shows `network_mode=auto` and `network_mode_effective=system`, direct networking failed and the runner used the system network fallback.
+
+The local AI backend uses the OpenAI-compatible chat-completions shape for `openai_compatible`, `ollama`, and `vllm`. LongCat's base URL is `https://api.longcat.chat/openai`; the direct HTTP endpoint used by the harness is `https://api.longcat.chat/openai/v1/chat/completions`, matching LongCat's cURL example. If `api_key_env` is set and the environment variable is absent, status reports a warning but no secret value is written to metadata. In `hybrid` mode, local AI first writes advisory preflight outputs under `local_ai/`: `preflight.json`, `prompt_review.md`, `cloud_prompt.md`, `risk_report.md`, `prompt_patch.md`, and `policy_warnings.json`. Qoder then writes raw cloud outputs under `qoder/`. Local AI postflight writes advisory review outputs: `review.md`, `audit_report.md`, `artifact_summary.md`, `suspected_issues.json`, `final_report.md`, and top-level `report.md`. Final pass/fail still comes from artifact/local validators plus policy, not from the local AI text.
 
 Default projects keep the `qoder` block non-secret and portable:
 
 ```yaml
 qoder:
   profile: default
+  network_mode: auto
   managed_agents:
     enabled: true
     delegation_strategy: agent_sync
@@ -146,10 +173,64 @@ The SwiftUI shell is in `macos/AcademicHarnessApp`. It reads project files and i
 ./scripts/build-app.sh
 ```
 
-The app supports project creation, project/Qoder/task/run/LAN status checks, task YAML editing, prompt Markdown editing, explicit `Fake 测试`, `本地把控`, `局域网实验`, `全云端`, and `Qoder CLI` actions, run file browsing, and LAN worker configuration. LAN worker execution is remote-data-only by default: local runs collect reports and lightweight registries, not raw datasets.
+The app remains a local project/run browser and report launcher. Pi is the preferred local agent conversation shell for task selection, run explanation, and validator review. LAN worker execution is remote-data-only by default: local runs collect reports and lightweight registries, not raw datasets.
+
+## Pi Integration
+
+`integrations/pi/` contains a local Pi package named `@mappedinfo/pi-academic-harness`. It exposes Academic Harness as Pi tools and commands while keeping policy, state, executors, artifacts, validators, and traces in the Python kernel.
+
+```bash
+cd integrations/pi
+npm install
+npm run pi:install
+# or for development without installing
+npm run pi:dev
+```
+
+The Pi CLI is provided by the package dependency `@earendil-works/pi-coding-agent`, so a global `pi` command is not required. If a global `pi` command already exists, `pi install ./integrations/pi` also works.
+
+Tools:
+
+- `academic_project_status`
+- `academic_list_tasks`
+- `academic_run_task`
+- `academic_show_run`
+- `academic_validate_run`
+- `academic_read_trace`
+
+Commands:
+
+- `/ah-status`
+- `/ah-run`
+- `/ah-show`
+- `/ah-validate`
+- `/ah-trace`
+- `/ah-qoder-cloud`
+
+The Pi extension calls the CLI with argument arrays and never passes Qoder PAT or local AI API key values in command arguments.
+
+Pi TUI integration:
+
+- Tool results and slash-command messages use a custom renderer that shows run id, state, policy decisions, validator statuses, and artifact paths.
+- Run-producing commands/tools automatically call `academic-harness run link-pi ...` so `manifest.json` records:
+
+```json
+{
+  "pi": {
+    "run_id": "...",
+    "pi_session_id": "...",
+    "pi_entry_id": "...",
+    "pi_session_file": "...",
+    "linked_at": "..."
+  }
+}
+```
+
+The link is audit metadata only. Kernel pass/fail remains controlled by policy and validators.
 
 ## Tests
 
 ```bash
 PYTHONPATH=src python -m unittest discover -s tests
+cd integrations/pi && npm run typecheck
 ```

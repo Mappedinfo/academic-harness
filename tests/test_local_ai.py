@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import socket
 import tempfile
 import unittest
 import urllib.error
@@ -58,6 +59,35 @@ class LocalAITests(unittest.TestCase):
         self.assertEqual(config.api_key, "secret")
         self.assertTrue(config.safe_metadata()["api_key_present"])
         self.assertNotIn("secret", json.dumps(config.safe_metadata()))
+        self.assertTrue(config.safe_metadata()["app_proxy_disabled"])
+
+    def test_longcat_defaults_read_dotenv_and_use_openai_v1_chat_endpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            (project / ".env").write_text(
+                "\n".join(
+                    [
+                        "LONG_CAT_API_URL=https://api.longcat.chat/openai",
+                        "LONG_CAT_API_" + "KEY=unit-test-longcat-key",
+                        "LONG_CAT_MODEL=LongCat-2.0",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {}, clear=True):
+                config = resolve_local_ai_config({"local_ai": {"enabled": True}}, project_root=project)
+
+        self.assertEqual(config.base_url, "https://api.longcat.chat/openai")
+        self.assertEqual(config.model, "LongCat-2.0")
+        self.assertEqual(config.api_key_env, "LONG_CAT_API_KEY")
+        self.assertEqual(config.api_key, "unit-test-longcat-key")
+
+        client = LocalAIClient(config)
+        fake = FakeOpener('{"choices":[{"message":{"content":"ok"}}]}')
+        client.opener = fake  # type: ignore[assignment]
+        self.assertEqual(client.chat([{"role": "user", "content": "hi"}]), "ok")
+        self.assertEqual(fake.last_request.full_url, "https://api.longcat.chat/openai/v1/chat/completions")
+        self.assertEqual(fake.last_request.headers.get("Authorization"), "Bearer unit-test-longcat-key")
 
     def test_status_reports_missing_config_and_token_warning(self) -> None:
         status = local_ai_status(
@@ -75,6 +105,7 @@ class LocalAITests(unittest.TestCase):
         self.assertTrue(status["ok"])
         self.assertFalse(status["api_key_present"])
         self.assertIn("token_warning", status)
+        self.assertTrue(status["app_proxy_disabled"])
 
         disabled = local_ai_status({"local_ai": {"enabled": False}})
         self.assertFalse(disabled["ok"])
@@ -89,6 +120,7 @@ class LocalAITests(unittest.TestCase):
             api_key_env="",
             api_key="",
             timeout_seconds=10,
+            transport="urllib",
         )
         client = LocalAIClient(config)
         client.opener = FakeOpener('{"choices":[{"message":{"content":"ok"}}]}')  # type: ignore[assignment]
@@ -104,6 +136,11 @@ class LocalAITests(unittest.TestCase):
         with self.assertRaises(LocalAIError):
             client.chat([{"role": "user", "content": "hi"}])
 
+        dns_error = urllib.error.URLError(socket.gaierror(8, "nodename nor servname provided, or not known"))
+        client.opener = FakeOpener(dns_error)  # type: ignore[assignment]
+        with self.assertRaisesRegex(LocalAIError, "direct/no-proxy DNS failed"):
+            client.chat([{"role": "user", "content": "hi"}])
+
     def test_set_local_ai_config_writes_project_yaml(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = init_project(Path(tmp) / "demo")
@@ -115,12 +152,16 @@ class LocalAITests(unittest.TestCase):
                 model="qwen",
                 api_key_env="",
                 timeout_seconds=30,
+                transport="curl",
+                env_file="local-ai.env",
             )
             data = load_yaml(project / "project.yaml")
 
         self.assertTrue(data["local_ai"]["enabled"])
         self.assertEqual(data["local_ai"]["provider"], "ollama")
         self.assertEqual(data["local_ai"]["model"], "qwen")
+        self.assertEqual(data["local_ai"]["transport"], "curl")
+        self.assertEqual(data["local_ai"]["env_file"], "local-ai.env")
         self.assertTrue(status["checks"]["local_ai"]["ok"])
 
 

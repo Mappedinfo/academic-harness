@@ -408,7 +408,9 @@ struct ContentView: View {
                 labeledField("Base URL", text: $model.localAIBaseURL)
                 labeledField("Model", text: $model.localAIModel)
                 labeledField("API Key Env", text: $model.localAIAPIKeyEnv)
+                labeledField("Env File", text: $model.localAIEnvFile)
                 labeledField("Timeout", text: $model.localAITimeout)
+                labeledField("Transport", text: $model.localAITransport)
                 HStack {
                     Button("保存本地 AI") { model.saveLocalAIConfig() }
                         .disabled(!model.hasProject || model.isRunning)
@@ -1179,17 +1181,21 @@ final class WorkbenchModel: ObservableObject {
     @Published var qoderManagedDelegationStrategy = "agent_sync"
     @Published var qoderManagedIncludeSelf = false
     @Published var qoderModelsMessage = "模型未检查"
+    @Published var qoderNetworkMode = "auto"
+    @Published var qoderNetworkModeEffective = "direct"
     @Published var managedAgentsEnabled = true
     @Published var managedAgentCount = 4
     @Published var managedDelegationStrategy = "agent_sync"
     @Published var requireManagedAgents = false
     @Published var localAIOK = false
-    @Published var localAIEnabled = false
+    @Published var localAIEnabled = true
     @Published var localAIProvider = "openai_compatible"
-    @Published var localAIBaseURL = "http://127.0.0.1:11434/v1"
-    @Published var localAIModel = ""
-    @Published var localAIAPIKeyEnv = "LOCAL_AI_API_KEY"
+    @Published var localAIBaseURL = "https://api.longcat.chat/openai"
+    @Published var localAIModel = "LongCat-2.0"
+    @Published var localAIAPIKeyEnv = "LONG_CAT_API_KEY"
+    @Published var localAIEnvFile = ""
     @Published var localAITimeout = "120"
+    @Published var localAITransport = "auto"
     @Published var localAIMessage = "本地 AI 未配置"
     @Published var showAdvancedQoderSettings = false
     @Published var showAdvancedAppSettings = false
@@ -1391,7 +1397,10 @@ final class WorkbenchModel: ObservableObject {
                 ? "多 Agent 模型可用: \(qoderManagedResolvedModel.isEmpty ? "自动选择" : qoderManagedResolvedModel)"
                 : "多 Agent 模型未就绪: \(qoderModelsMessage)"
             let schemaText = qoderManagedSchemaOK ? "Multiagent schema OK" : "Multiagent schema 需更新"
-            return "已连接 \(runner)，使用 \(config)，Profile: \(qoderProfile)。\(modelText)。\(schemaText)。\(qoderManagedMessage)。\(nextStep)"
+            let networkText = qoderNetworkModeEffective == qoderNetworkMode
+                ? "网络: \(qoderNetworkMode)"
+                : "网络: \(qoderNetworkMode) -> \(qoderNetworkModeEffective)"
+            return "已连接 \(runner)，使用 \(config)，Profile: \(qoderProfile)。\(networkText)。\(modelText)。\(schemaText)。\(qoderManagedMessage)。\(nextStep)"
         }
         return "点击“一键配置 Qoder”会安装/注册 qoder-run，并让项目回到系统自动发现模式。"
     }
@@ -1402,6 +1411,7 @@ final class WorkbenchModel: ObservableObject {
             "Runner: \(qoderRunnerPath.isEmpty ? qoderRunnerCommand : qoderRunnerPath)",
             "Config: \(qoderResolvedConfigPath.isEmpty ? qoderConfigPath : qoderResolvedConfigPath)",
             "Registry: \(qoderRegistryPath.isEmpty ? "默认位置" : qoderRegistryPath)",
+            "Network: requested=\(qoderNetworkMode), effective=\(qoderNetworkModeEffective)",
             "Models: \(qoderModelsMessage)",
             "Managed model: requested=\(qoderManagedRequestedModel.isEmpty ? "auto" : qoderManagedRequestedModel), resolved=\(qoderManagedResolvedModel.isEmpty ? "none" : qoderManagedResolvedModel), source=\(qoderManagedModelSource.isEmpty ? "unknown" : qoderManagedModelSource)",
             "Managed schema: ok=\(qoderManagedSchemaOK), agents=\(qoderManagedAgentCount), strategy=\(qoderManagedDelegationStrategy), include_self=\(qoderManagedIncludeSelf)",
@@ -1703,7 +1713,9 @@ final class WorkbenchModel: ObservableObject {
         let baseURL = localAIBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         let model = localAIModel.trimmingCharacters(in: .whitespacesAndNewlines)
         let apiKeyEnv = localAIAPIKeyEnv.trimmingCharacters(in: .whitespacesAndNewlines)
+        let envFile = localAIEnvFile.trimmingCharacters(in: .whitespacesAndNewlines)
         let timeout = localAITimeout.trimmingCharacters(in: .whitespacesAndNewlines)
+        let transport = localAITransport.trimmingCharacters(in: .whitespacesAndNewlines)
         if !provider.isEmpty {
             args.append(contentsOf: ["--provider", provider])
         }
@@ -1716,8 +1728,14 @@ final class WorkbenchModel: ObservableObject {
         if !apiKeyEnv.isEmpty {
             args.append(contentsOf: ["--api-key-env", apiKeyEnv])
         }
+        if !envFile.isEmpty {
+            args.append(contentsOf: ["--env-file", envFile])
+        }
         if !timeout.isEmpty {
             args.append(contentsOf: ["--timeout-seconds", timeout])
+        }
+        if !transport.isEmpty {
+            args.append(contentsOf: ["--transport", transport])
         }
         runCLI(arguments: args) { [weak self] _ in
             self?.refreshProjectStatus(checkLAN: false)
@@ -2491,6 +2509,8 @@ final class WorkbenchModel: ObservableObject {
             qoderProfile = qoderObject["profile"] as? String ?? qoderProfile
             if let models = qoderObject["models"] as? [String: Any] {
                 qoderModelsMessage = models["message"] as? String ?? qoderModelsMessage
+                qoderNetworkMode = models["network_mode"] as? String ?? qoderNetworkMode
+                qoderNetworkModeEffective = models["network_mode_effective"] as? String ?? qoderNetworkModeEffective
             }
             if let managed = qoderObject["managed_agents"] as? [String: Any] {
                 qoderManagedMessage = managed["message"] as? String ?? qoderManagedMessage
@@ -2527,6 +2547,8 @@ final class WorkbenchModel: ObservableObject {
             localAIBaseURL = localAIObject["base_url"] as? String ?? localAIBaseURL
             localAIModel = localAIObject["model"] as? String ?? localAIModel
             localAIAPIKeyEnv = localAIObject["api_key_env"] as? String ?? localAIAPIKeyEnv
+            localAIEnvFile = localAIObject["env_file"] as? String ?? localAIEnvFile
+            localAITransport = localAIObject["transport"] as? String ?? localAITransport
             if let timeout = localAIObject["timeout_seconds"] as? Int {
                 localAITimeout = String(timeout)
             }
